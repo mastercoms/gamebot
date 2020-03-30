@@ -4,6 +4,7 @@ import datetime
 import dateparser
 import arrow
 from fuzzywuzzy import fuzz, process
+import os
 
 client = discord.Client()
 
@@ -212,4 +213,4 @@ def finish_dank(channel):
     dankers = []
 
 
-client.run('TOKEN')
+client.run(os.environ['DANK_TOKEN'])
