@@ -40,8 +40,7 @@ def represents_int(s):
 
 
 @client.event
-@asyncio.coroutine
-def on_message(message):
+async def on_message(message):
     if message.author == client.user or message.author.bot:
         return
 
@@ -72,7 +71,7 @@ def on_message(message):
                     if role.name == "Admin":
                         dank_check_countdown = 0
                         return
-            yield from add_to_dank(message.author, message.channel)
+            await add_to_dank(message.author, message.channel)
         else:
             game = ''
             delta = None
@@ -121,28 +120,20 @@ def on_message(message):
             current_game = game
             current_datetime = attempt_date
             if refresh_dank_countdown:
-                yield from client.send_message(message.channel,
-                                               "<@&{0}> {1} requested a Dank Check. (expires in {2} seconds)".format(
-                                                   game_roles[current_game], name, dank_check_countdown))
-                asyncio.async(finish_dank(message.channel))
+                await message.channel.send(f"<@&{game_roles[current_game]}> {name} requested a Dank Check. (expires in {dank_check_countdown} seconds)")
+                asyncio.ensure_future(finish_dank(message.channel))
                 return
             attempted_humanize_distance = arrow.get(attempt_date).humanize(other=now, only_distance=True)
             if len(attempted_humanize_distance.split(" ")) < 2 or attempted_humanize_distance == "just now":
                 attempted_humanize_distance = dank_check_countdown.__str__() + " seconds"
-                msg = "<@&{0}> {1} scheduled a dank in {2} ({3})." \
-                    .format(game_roles[current_game], name, attempted_humanize_distance,
-                            current_datetime.strftime('%I:%M %p %Z'))
+                msg = f"<@&{game_roles[current_game]}> {name} scheduled a dank in {attempted_humanize_distance} ({current_datetime.strftime('%I:%M %p %Z')})."
             else:
-
-                msg = "<@&{0}> {1} scheduled a dank in about {2} ({3})."\
-                    .format(game_roles[current_game], name, attempted_humanize_distance,
-                            current_datetime.strftime('%I:%M %p %Z'))
-            yield from client.send_message(message.channel, msg)
-            asyncio.async(finish_dank(message.channel))
+                msg = f"<@&{game_roles[current_game]}> {name} scheduled a dank in about {attempted_humanize_distance} ({current_datetime.strftime('%I:%M %p %Z')})."
+            await message.channel.send(msg)
+            asyncio.ensure_future(finish_dank(message.channel))
 
 
-@asyncio.coroutine
-def add_to_dank(user, channel):
+async def add_to_dank(user, channel):
     global dankers
     global dank_check_countdown
     global refresh_dank_countdown
@@ -152,17 +143,15 @@ def add_to_dank(user, channel):
         name = user.nick if user.nick else user.name
         dankers.append(user)
         if refresh_dank_countdown:
-            msg = "{0} is ready to dank. **({1}/5)**".format(name, len(dankers))
+            msg = f"{name} is ready to dank. **({len(dankers)}/5)**"
         else:
-            msg = "{0} can dank at {1}. **({2}/5)**".format(name, current_datetime.strftime('%I:%M %p %Z'),
-                                                            len(dankers))
-        yield from client.send_message(channel, msg)
+            msg = f"{name} can dank at {current_datetime.strftime('%I:%M %p %Z')}. **({len(dankers)}/5)**"
+        await channel.send(msg)
         if refresh_dank_countdown:
             dank_check_countdown = 31
 
 
-@asyncio.coroutine
-def finish_dank(channel):
+async def finish_dank(channel):
     global refresh_dank_countdown
     global dank_check_countdown
     global danking
@@ -170,7 +159,7 @@ def finish_dank(channel):
     global cancel_dank
 
     while dank_check_countdown > 0 and len(dankers) < 5:
-        yield from asyncio.sleep(1)
+        await asyncio.sleep(1)
         dank_check_countdown -= 1
 
     danking = False
@@ -181,8 +170,7 @@ def finish_dank(channel):
         danker_name = danker.nick if danker.nick else danker.name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         cancel_dank = False
-        yield from client.send_message(channel, "{0}{1} dank cancelled.".format(
-            danker_name, possess_string))
+        await channel.send(f"{danker_name}{possess_string} dank cancelled.")
         return
 
     mentions_list = ''
@@ -190,25 +178,22 @@ def finish_dank(channel):
         mentions_list += danker.mention + " "
 
     if refresh_dank_countdown:
-        yield from client.send_message(channel, "{0}Dank Check complete. **{1}/5** players ready to dank.".format(
-            mentions_list, len(dankers)))
+        await channel.send(f"{mentions_list} Dank Check complete. **{len(dankers)}/5** players ready to dank.")
     elif len(dankers) > 1:
         refresh_dank_countdown = True
         dank_check_countdown = 31
         danker = dankers[0]
         danking = True
         danker_name = danker.nick if danker.nick else danker.name
-        yield from client.send_message(channel, "{0}{1} requested a Dank Check. (expires in {2} seconds)".format(
-            mentions_list, danker_name, dank_check_countdown))
+        await channel.send(f"{mentions_list} {danker_name} requested a Dank Check. (expires in {dank_check_countdown} seconds).")
         dankers = []
-        asyncio.async(finish_dank(channel))
+        asyncio.ensure_future(finish_dank(channel))
     else:
         dank_check_countdown = 31
         danker = dankers[0]
         danker_name = danker.nick if danker.nick else danker.name
         possess_string = "'" if danker_name.endswith("s") else "'s"
-        yield from client.send_message(channel, "No candidates found for {0}{1} dank.".format(
-            danker_name, possess_string))
+        await channel.send(f"No candidates found for {danker_name}{possess_string} dank.")
 
     dankers = []
 
