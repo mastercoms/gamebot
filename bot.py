@@ -9,7 +9,7 @@ import os
 client = discord.Client()
 
 danking = False
-dank_check_countdown = 31
+dank_check_countdown = 300
 default_delta = datetime.timedelta(seconds=dank_check_countdown)
 current_delta = default_delta
 tz = datetime.timezone(-datetime.timedelta(hours=4), name="ET")
@@ -100,10 +100,8 @@ async def on_message(message):
                 delta = default_delta
             current_delta = delta
             dank_check_countdown = int(round(current_delta.total_seconds()))
-            if dank_check_countdown < 60:
+            if dank_check_countdown < 600:
                 refresh_dank_countdown = True
-            elif dank_check_countdown > 28800:
-                return
             else:
                 refresh_dank_countdown = False
             if not game:
@@ -143,8 +141,6 @@ async def add_to_dank(user, channel):
         else:
             msg = f"{name} can dank at {current_datetime.strftime('%I:%M %p %Z')}. **({len(dankers)}/5)**"
         await channel.send(msg)
-        if refresh_dank_countdown:
-            dank_check_countdown = 31
 
 
 async def finish_dank(channel):
@@ -153,15 +149,24 @@ async def finish_dank(channel):
     global danking
     global dankers
     global cancel_dank
+    
+    danker_count = len(dankers)
 
-    while dank_check_countdown > 0 and len(dankers) < 5:
+    while dank_check_countdown > 0 and danker_count < 5:
         await asyncio.sleep(1)
-        dank_check_countdown -= 1
+        if cancel_dank:
+            break
+        elif refresh_dank_countdown and danker_count != len(dankers):
+            danker_count = len(dankers)
+            dank_check_countdown = 300
+        else:
+            danker_count = len(dankers)
+            dank_check_countdown -= 1
 
     danking = False
 
     if cancel_dank:
-        dank_check_countdown = 31
+        dank_check_countdown = 300
         danker = dankers[0]
         danker_name = danker.nick if danker.nick else danker.name
         possess_string = "'" if danker_name.endswith("s") else "'s"
@@ -173,11 +178,11 @@ async def finish_dank(channel):
     for danker in dankers:
         mentions_list += danker.mention + " "
 
-    if refresh_dank_countdown:
+    if refresh_dank_countdown and len(dankers) > 2:
         await channel.send(f"{mentions_list} Dank Check complete. **{len(dankers)}/5** players ready to dank.")
-    elif len(dankers) > 1:
+    elif not refresh_dank_countdown and len(dankers) > 2:
         refresh_dank_countdown = True
-        dank_check_countdown = 31
+        dank_check_countdown = 300
         danker = dankers[0]
         danking = True
         danker_name = danker.nick if danker.nick else danker.name
@@ -185,7 +190,7 @@ async def finish_dank(channel):
         dankers = []
         asyncio.ensure_future(finish_dank(channel))
     else:
-        dank_check_countdown = 31
+        dank_check_countdown = 300
         danker = dankers[0]
         danker_name = danker.nick if danker.nick else danker.name
         possess_string = "'" if danker_name.endswith("s") else "'s"
