@@ -61,16 +61,12 @@ async def on_message(message):
                                                               "dank") > 70:
         if danking:
             if message.content.split(" ")[-1] == "cancel":
-                for role in message.author.roles:
-                    if role.name == "Admin":
-                        dank_check_countdown = 0
-                        cancel_dank = True
-                        return
+                dank_check_countdown = 0
+                cancel_dank = True
+                return
             if message.content.split(" ")[-1] == "now":
-                for role in message.author.roles:
-                    if role.name == "Admin":
-                        dank_check_countdown = 0
-                        return
+                dank_check_countdown = 0
+                return
             await add_to_dank(message.author, message.channel)
         else:
             game = ''
