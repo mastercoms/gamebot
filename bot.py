@@ -23,6 +23,10 @@ cancel_dank = False
 game_roles = {
     'dota': '261137719579770882',
     'dota3': '816138937227018262',
+    'custom hero clash': '816138937227018262',
+    'chc': '816138937227018262',
+    'dota 3': '816138937227018262',
+    'clash': '816138937227018262',
     'fortnite': '393157155651452939',
     'valheim': '811644165402263573',
     'drg': '811644215770873886',
@@ -60,8 +64,7 @@ async def on_message(message):
 
     message.content = message.content.lower()
 
-    if message.content.startswith("d") and fuzz.partial_ratio(message.content,
-                                                              "dank") > 70:
+    if message.content.split(" ")[0] == "dank":
         if danking:
             if message.content.split(" ")[-1] == "cancel":
                 dank_check_countdown = 0
