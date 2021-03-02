@@ -12,7 +12,7 @@ DEFAULT_COUNTDOWN = 120
 
 danking = False
 dank_check_countdown = DEFAULT_COUNTDOWN
-default_delta = datetime.timedelta(seconds=dank_check_countdown)
+default_delta = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
 current_delta = default_delta
 tz = datetime.timezone(-datetime.timedelta(hours=4), name="ET")
 current_datetime = datetime.datetime.now(tz=tz)
@@ -20,12 +20,13 @@ refresh_dank_countdown = True
 dankers = []
 cancel_dank = False
 
-resolution = datetime.timedelta(seconds=1)
-
 game_roles = {
     'dota': '261137719579770882',
     'dota3': '816138937227018262',
-    'fortnite': '393157155651452939'
+    'fortnite': '393157155651452939',
+    'valheim': '811644165402263573',
+    'drg': '811644215770873886',
+    'overwatch': '502617966261698561'
 }
 
 games = list(game_roles.keys())
@@ -54,7 +55,6 @@ async def on_message(message):
     global current_datetime
     global current_delta
     global current_game
-    global resolution
     global tz
     global cancel_dank
 
@@ -169,8 +169,10 @@ async def finish_dank(channel):
     danking = False
 
     if cancel_dank:
+        refresh_dank_countdown = True
         dank_check_countdown = DEFAULT_COUNTDOWN
         danker = dankers[0]
+        dankers = []
         danker_name = danker.nick if danker.nick else danker.name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         cancel_dank = False
