@@ -62,14 +62,18 @@ async def on_message(message):
 
     message.content = message.content.lower()
 
-    if message.content.split(" ")[0] == "dank":
+    if message.content.split(" ")[0].startswith("dank"):
         if danking:
-            if message.content.split(" ")[-1] == "cancel":
+            control = message.content.split(" ")[-1]
+            if control == "cancel":
                 dank_check_countdown = 0
                 cancel_dank = True
                 return
-            if message.content.split(" ")[-1] == "now":
+            if control == "now":
                 dank_check_countdown = 0
+                return
+            if control == "leave":
+                dankers.remove(message.author)
                 return
             await add_to_dank(message.author, message.channel)
         else:
@@ -113,7 +117,7 @@ async def on_message(message):
             if attempt_date is None:
                 attempt_date = now + current_delta
             danking = True
-            name = message.author.nick if message.author.nick else message.author.name
+            name = message.author.display_name
             dankers.append(message.author)
             current_game = game
             current_datetime = attempt_date
@@ -138,7 +142,7 @@ async def add_to_dank(user, channel):
     global current_datetime
 
     if user not in dankers:
-        name = user.nick if user.nick else user.name
+        name = user.display_name
         dankers.append(user)
         if refresh_dank_countdown:
             msg = f"{name} is ready to dank. **({len(dankers)}/5)**"
@@ -174,7 +178,7 @@ async def finish_dank(channel):
         dank_check_countdown = DEFAULT_COUNTDOWN
         danker = dankers[0]
         dankers = []
-        danker_name = danker.nick if danker.nick else danker.name
+        danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         cancel_dank = False
         await channel.send(f"{danker_name}{possess_string} dank cancelled.")
@@ -192,14 +196,14 @@ async def finish_dank(channel):
             dank_check_countdown = DEFAULT_COUNTDOWN
             danker = dankers[0]
             danking = True
-            danker_name = danker.nick if danker.nick else danker.name
+            danker_name = danker.display_name
             await channel.send(f"{mentions_list} {danker_name} requested a Dank Check. (expires in {dank_check_countdown} seconds).")
             dankers = []
             asyncio.ensure_future(finish_dank(channel))
     else:
         dank_check_countdown = DEFAULT_COUNTDOWN
         danker = dankers[0]
-        danker_name = danker.nick if danker.nick else danker.name
+        danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         await channel.send(f"No candidates found for {danker_name}{possess_string} dank.")
 
