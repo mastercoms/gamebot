@@ -192,22 +192,20 @@ async def finish_dank(channel):
         if refresh_dank_countdown:
             await channel.send(f"{mentions_list} Dank Check complete. **{len(dankers)}/5** players ready to dank.")
         else:
-            refresh_dank_countdown = True
-            dank_check_countdown = DEFAULT_COUNTDOWN
             danker = dankers[0]
             danking = True
             danker_name = danker.display_name
             await channel.send(f"{mentions_list} {danker_name} requested a Dank Check. (expires in {dank_check_countdown} seconds).")
-            dankers = []
             asyncio.ensure_future(finish_dank(channel))
-    else:
-        dank_check_countdown = DEFAULT_COUNTDOWN
+    else if len(dankers) == 1:
         danker = dankers[0]
         danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         await channel.send(f"No candidates found for {danker_name}{possess_string} dank.")
 
     dankers = []
+    dank_check_countdown = DEFAULT_COUNTDOWN
+    refresh_dank_countdown = True
 
 
 client.run(os.environ['DANK_TOKEN'])
