@@ -197,7 +197,7 @@ async def finish_dank(channel):
             danker_name = danker.display_name
             await channel.send(f"{mentions_list} {danker_name} requested a Dank Check. (expires in {dank_check_countdown} seconds).")
             asyncio.ensure_future(finish_dank(channel))
-    else if len(dankers) == 1:
+    elif len(dankers) == 1:
         danker = dankers[0]
         danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
