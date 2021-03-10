@@ -73,6 +73,7 @@ async def on_message(message):
                 dank_check_countdown = 0
                 return
             if control == "leave":
+                await message.channel.send("You left this dank.")
                 dankers.remove(message.author)
                 return
             await add_to_dank(message.author, message.channel)
@@ -176,12 +177,15 @@ async def finish_dank(channel):
     if cancel_dank:
         refresh_dank_countdown = True
         dank_check_countdown = DEFAULT_COUNTDOWN
-        danker = dankers[0]
-        dankers = []
-        danker_name = danker.display_name
-        possess_string = "'" if danker_name.endswith("s") else "'s"
         cancel_dank = False
-        await channel.send(f"{danker_name}{possess_string} dank cancelled.")
+        if len(dankers) > 0:
+            danker = dankers[0]
+            danker_name = danker.display_name
+            possess_string = "'" if danker_name.endswith("s") else "'s"
+            await channel.send(f"{danker_name}{possess_string} dank cancelled.")
+        else:
+            await channel.send("Dank cancelled.")
+        dankers = []
         return
 
     mentions_list = ''
@@ -202,6 +206,8 @@ async def finish_dank(channel):
         danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
         await channel.send(f"No candidates found for {danker_name}{possess_string} dank.")
+    else:
+        await channel.send(f"No candidates found for the dank.")
 
     dankers = []
     dank_check_countdown = DEFAULT_COUNTDOWN
