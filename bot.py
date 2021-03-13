@@ -33,8 +33,8 @@ game_roles = {
 
 games = list(game_roles.keys())
 
-default_game = 'dota'
-current_game = 'dota'
+DEFAULT_GAME = 'dota'
+current_game = DEFAULT_GAME
 
 
 def represents_int(s):
@@ -108,13 +108,13 @@ async def on_message(message):
             if delta is None:
                 delta = default_delta
             current_delta = delta
-            dank_check_countdown = int(round(current_delta.total_seconds()))
+            dank_check_countdown = max(DEFAULT_COUNTDOWN, int(round(current_delta.total_seconds())))
             if dank_check_countdown < 600:
                 refresh_dank_countdown = True
             else:
                 refresh_dank_countdown = False
             if not game:
-                game = 'dota'
+                game = DEFAULT_GAME
             if attempt_date is None:
                 attempt_date = now + current_delta
             danking = True
@@ -199,6 +199,7 @@ async def finish_dank(channel):
             danker = dankers[0]
             danking = True
             danker_name = danker.display_name
+            dank_check_countdown = DEFAULT_COUNTDOWN
             await channel.send(f"{mentions_list} {danker_name} requested a Dank Check. (expires in {dank_check_countdown} seconds).")
             asyncio.ensure_future(finish_dank(channel))
     elif len(dankers) == 1:
