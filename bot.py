@@ -25,10 +25,8 @@ game_roles = {
     'dota3': '816138937227018262',
     'chc': '816138937227018262',
     'clash': '816138937227018262',
-    'fortnite': '393157155651452939',
     'valheim': '811644165402263573',
-    'drg': '811644215770873886',
-    'overwatch': '502617966261698561'
+    'rocket': '825202252666109972'
 }
 
 games = list(game_roles.keys())
@@ -64,7 +62,9 @@ async def on_message(message):
 
     if message.content.split(" ")[0].startswith("dank"):
         if danking:
-            control = message.content.split(" ")[-1]
+            args = message.content.split(" ")
+            argl = len(args)
+            control = args[1] if argl > 1 else None
             if control == "cancel":
                 dank_check_countdown = 0
                 cancel_dank = True
