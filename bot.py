@@ -188,9 +188,7 @@ async def finish_dank(channel):
         dankers = []
         return
 
-    mentions_list = ''
-    for danker in dankers:
-        mentions_list += danker.mention + " "
+    mentions_list = " ".join(dankers)
 
     if len(dankers) > 1:
         if refresh_dank_countdown:
