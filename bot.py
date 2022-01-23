@@ -183,9 +183,8 @@ async def finish_dank(channel):
         dankers = []
         return
 
-    mentions_list = " ".join(dankers)
-
     if len(dankers) > 1:
+        mentions_list = " ".join([danker.mention for danker in dankers])
         if refresh_dank_countdown:
             await channel.send(f"{mentions_list} Dank Check complete. **{len(dankers)}/5** players ready to dank.")
         else:
