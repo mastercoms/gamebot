@@ -162,7 +162,7 @@ async def finish_dank(channel):
             break
         elif refresh_dank_countdown and danker_count != len(dankers):
             danker_count = len(dankers)
-            dank_check_countdown = DEFAULT_COUNTDOWN
+            dank_check_countdown = max(DEFAULT_COUNTDOWN, dank_check_countdown)
         else:
             danker_count = len(dankers)
             dank_check_countdown -= 1
