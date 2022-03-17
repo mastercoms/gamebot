@@ -154,6 +154,7 @@ async def finish_dank(channel):
     global danking
     global dankers
     global cancel_dank
+    global no_dankers
     
     danker_count = len(dankers)
 
@@ -199,12 +200,10 @@ async def finish_dank(channel):
         danker = dankers[0]
         danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
-        global no_dankers
         no_dankers += 1
         await channel.send(f"No candidates found for {danker_name}{possess_string} dank. This server has gone {no_dankers} danks without a dank.")
         await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
     else:
-        global no_dankers
         no_dankers += 1
         await channel.send(f"No candidates found for the dank. This server has gone {no_dankers} danks without a dank.")
         await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
