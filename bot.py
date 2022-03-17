@@ -17,6 +17,7 @@ current_delta = default_delta
 tz = datetime.timezone(-datetime.timedelta(hours=4), name="ET")
 current_datetime = datetime.datetime.now(tz=tz)
 refresh_dank_countdown = True
+no_dankers = 0
 dankers = []
 cancel_dank = False
 
@@ -198,9 +199,15 @@ async def finish_dank(channel):
         danker = dankers[0]
         danker_name = danker.display_name
         possess_string = "'" if danker_name.endswith("s") else "'s"
-        await channel.send(f"No candidates found for {danker_name}{possess_string} dank.")
+        global no_dankers
+        no_dankers += 1
+        await channel.send(f"No candidates found for {danker_name}{possess_string} dank. This server has gone {no_dankers} danks without a dank.")
+        await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
     else:
-        await channel.send(f"No candidates found for the dank.")
+        global no_dankers
+        no_dankers += 1
+        await channel.send(f"No candidates found for the dank. This server has gone {no_dankers} danks without a dank.")
+        await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
 
     dankers = []
     dank_check_countdown = DEFAULT_COUNTDOWN
