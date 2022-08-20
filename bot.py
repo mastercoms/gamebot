@@ -313,6 +313,7 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                     end = 0
                     new_start = 0
                     last = len(args)
+                    confirmed_date = None
                     # go through until we get a date
                     while True:
                         datestring += " " + args[end] if datestring else args[end]
@@ -327,14 +328,16 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                         if attempt_date:
                             # now we know our new start
                             new_start = end
+                            confirmed_date = attempt_date
                         # if we surpass the last arg, end
                         if end >= last:
                             break
                     # consume our peeked inputs to the date
                     del args[:new_start]
-                    options.future = attempt_date
-                    if options.future.tzinfo is None:
-                        options.future = options.future.replace(tzinfo=TIMESTAMP_TIMEZONE)
+                    if confirmed_date:
+                        if confirmed_date.tzinfo is None:
+                            confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
+                        options.future = confirmed_date
                     return options
                 if control == "in":
                     arw = arrow.get(client.now)
@@ -342,7 +345,7 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                     end = 0
                     new_start = 0
                     last = len(args)
-                    attempt_date = None
+                    confirmed_date = None
                     # go through until we get a date
                     while True:
                         datestring += " " + args[end]
@@ -350,20 +353,20 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                             attempt_date = arw.dehumanize(datestring, locale="en")
                         except ValueError:
                             # didn't work
-                            pass
+                            attempt_date = None
                         # go to next arg
                         end += 1
                         # we made a new date
                         if attempt_date:
                             # now we know our new start
                             new_start = end
+                            confirmed_date = attempt_date.datetime
                         # if we surpass the last arg, end
                         if end >= last:
                             break
                     # consume our peeked inputs to the date
                     del args[:new_start]
-                    if attempt_date:
-                        options.future = attempt_date.datetime
+                    options.future = confirmed_date
                     return options
 
     if args:
