@@ -224,6 +224,7 @@ class Dank:
             no_dankers_consecutive += 1
             set_value("no_dankers_consecutive", no_dankers_consecutive)
             await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks with a dank. ({no_dankers_consecutive} in a row).")
+            await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
         client.current_dank = None
 
     def cancel_task(self, reason: str = "Cancelled"):
