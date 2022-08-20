@@ -80,6 +80,7 @@ class Dank:
     message: Optional[discord.Message]
     task: Optional[asyncio.Task]
     has_initial: bool
+    was_scheduled: Optional[bool]
 
     def __init__(self, channel: discord.TextChannel, author: discord.User):
         self.group_buckets = dict()
@@ -95,6 +96,7 @@ class Dank:
         self.task = None
 
         self.has_initial = False
+        self.was_scheduled = None
 
     async def start(self, future: datetime.datetime, mention: str = None):
         """
@@ -112,6 +114,8 @@ class Dank:
 
         countdown = max(DEFAULT_COUNTDOWN, self.get_delta_seconds())
         self.is_checking = countdown <= MAX_CHECK_COUNTDOWN
+        if self.was_scheduled is None:
+            self.was_scheduled = not self.is_checking
 
     async def initialize(self, mention: str = None):
         """
@@ -124,8 +128,11 @@ class Dank:
             msg = f"{mention} {name} requested a Dank Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, 't')
-            msg = f"{mention} {name} scheduled a dank {relative_time} ({short_time})."
-        self.message = await self.channel.send(msg)
+            msg = f"{mention} {name} scheduled a dank at {short_time} ({relative_time})."
+        if self.message:
+            await self.message.edit(content=msg)
+        else:
+            self.message = await self.channel.send(msg)
         self.start_countdown()
 
     def get_delta(self) -> datetime.timedelta:
@@ -161,7 +168,7 @@ class Dank:
                 countdown = self.get_delta_seconds()
                 if 1 < countdown < DEFAULT_COUNTDOWN:
                     missing_countdown = datetime.timedelta(seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds())
-                    self.refresh(self.future + missing_countdown)
+                    await self.refresh(self.future + missing_countdown)
             else:
                 short_time = print_timestamp(self.timestamp, 't')
                 relative_time = print_timestamp(self.timestamp, 'R')
@@ -184,13 +191,16 @@ class Dank:
     def start_countdown(self):
         self.task = asyncio.create_task(self.countdown(), name="Countdown")
 
-    def refresh(self, future: datetime.datetime):
+    async def refresh(self, future: datetime.datetime):
         """
          Refreshes the dank with a new countdown.
         """
         self.cancel_task(reason="Refreshing")
-        self.update_future(future)
-        self.start_countdown()
+        mention = None
+        if self.was_scheduled:
+            dankers = self.get_dankers()
+            mention = " ".join([danker.mention for danker in dankers])
+        await self.start(future, mention=mention)
 
     async def countdown(self):
         """
@@ -215,6 +225,7 @@ class Dank:
             else:
                 # start the dank up again
                 client.now = datetime.datetime.utcnow()
+                self.message = None
                 await self.start(client.now + DEFAULT_DELTA, mention=mention)
         else:
             no_dankers = get_value("no_dankers", 0)
@@ -224,7 +235,7 @@ class Dank:
             no_dankers_consecutive += 1
             set_value("no_dankers_consecutive", no_dankers_consecutive)
             await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks with a dank. ({no_dankers_consecutive} in a row).")
-            await channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
+            await self.channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
         client.current_dank = None
 
     def cancel_task(self, reason: str = "Cancelled"):
