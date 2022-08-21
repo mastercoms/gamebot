@@ -11,6 +11,7 @@ import arrow
 
 from discord import Intents
 from tinydb import TinyDB, Query
+from fuzzywuzzy import fuzz
 
 intents = Intents.default()
 intents.message_content = True
@@ -18,6 +19,9 @@ client = discord.Client(intents=intents)
 
 client.current_dank = None
 client.now = None
+
+client.lock = asyncio.Lock()
+
 client.db = TinyDB("./db.json")
 Store = Query()
 
@@ -66,7 +70,8 @@ DEFAULT_DELTA = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
 GAME_ROLES = {
     'dota': 261137719579770882
 }
-DEFAULT_GAME = 'dota'
+GAMES = list(GAME_ROLES.keys())
+DEFAULT_GAME = GAMES[0]
 
 
 class Dank:
@@ -382,6 +387,15 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
     return options
 
 
+FUZZ_THRESHOLD = 70
+TOKEN_WORD = "dank"
+
+
+def is_dank(content: str) -> bool:
+    word = content.split(" ")[0]
+    return word.startswith(TOKEN_WORD) or fuzz.ratio(word, TOKEN_WORD)
+
+
 @client.event
 async def on_message(message):
     if message.author == client.user or message.author.bot:
@@ -389,37 +403,39 @@ async def on_message(message):
 
     message.content = message.content.lower()
 
-    if message.content.split(" ")[0].startswith("dank"):
-        # set our global now to when the message was made
-        client.now = message.created_at
+    if is_dank(message.content):
+        async with client.lock:
+            if not client.current_dank:
+                # set our global now to when the message was made
+                client.now = message.created_at
 
-        # set up our arg parser
-        args = message.content.split(" ")[1:]
-        danker = message.author
-        options = DankOptions()
+            # set up our arg parser
+            args = message.content.split(" ")[1:]
+            danker = message.author
+            options = DankOptions()
 
-        # consume all args
-        while args:
-            options = await consume_args(args, danker, options)
-            # if we cleared options, then we stop here
-            if not options:
-                return
+            # consume all args
+            while args:
+                options = await consume_args(args, danker, options)
+                # if we cleared options, then we stop here
+                if not options:
+                    return
 
-        # are we going to start a dank?
-        if not client.current_dank:
-            # check if it's sufficiently in the future
-            if options.future:
-                delta = options.future - client.now
-                if delta < DEFAULT_DELTA:
-                    options.future = None
-            # if didn't get a date, default to delta
-            if not options.future:
-                options.future = client.now + DEFAULT_DELTA
-            client.current_dank = Dank(message.channel, danker)
-            await client.current_dank.start(options.future)
+            # are we going to start a dank?
+            if not client.current_dank:
+                # check if it's sufficiently in the future
+                if options.future:
+                    delta = options.future - client.now
+                    if delta < DEFAULT_DELTA:
+                        options.future = None
+                # if didn't get a date, default to delta
+                if not options.future:
+                    options.future = client.now + DEFAULT_DELTA
+                client.current_dank = Dank(message.channel, danker)
+                await client.current_dank.start(options.future)
 
-        # add to dank
-        await client.current_dank.add_danker(message.author, options.bucket)
+            # add to dank
+            await client.current_dank.add_danker(message.author, options.bucket)
 
 
 client.run(os.environ['DANK_TOKEN'])
