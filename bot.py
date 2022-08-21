@@ -133,7 +133,9 @@ class Dank:
             short_time = print_timestamp(self.timestamp, 't')
             msg = f"{mention} {name} scheduled a dank at {short_time} ({relative_time})."
         if self.message:
-            await self.message.edit(content=msg)
+            # TODO
+            pass
+            #await self.message.edit(content=msg)
         else:
             self.message = await self.channel.send(msg)
         self.start_countdown()
