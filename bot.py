@@ -81,6 +81,7 @@ class Dank:
     task: Optional[asyncio.Task]
     has_initial: bool
     was_scheduled: Optional[bool]
+    base_mention: Optional[str]
 
     def __init__(self, channel: discord.TextChannel, author: discord.User):
         self.reset()
@@ -100,6 +101,7 @@ class Dank:
             self.group_buckets[bucket] = set()
         self.danker_buckets = dict()
         self.message = None
+        self.base_mention = None
 
     async def start(self, future: datetime.datetime, mention: str = None):
         """
@@ -124,18 +126,17 @@ class Dank:
         """
         Starts/schedules the dank check.
         """
+        if self.base_mention is None:
+            self.base_mention = f"<@&{self.role}>" if mention is None else mention
         name = self.author.display_name
-        mention = f"<@&{self.role}>" if mention is None else mention
         relative_time = print_timestamp(self.timestamp, 'R')
         if self.is_checking:
-            msg = f"{mention} {name} requested a Dank Check. (expires {relative_time})"
+            msg = f"{self.base_mention} {name} requested a Dank Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, 't')
-            msg = f"{mention} {name} scheduled a dank at {short_time} ({relative_time})."
+            msg = f"{self.base_mention} {name} scheduled a dank at {short_time} ({relative_time})."
         if self.message:
-            # TODO
-            pass
-            #await self.message.edit(content=msg)
+            await self.message.edit(content=msg)
         else:
             self.message = await self.channel.send(msg)
         self.start_countdown()
@@ -201,11 +202,7 @@ class Dank:
          Refreshes the dank with a new countdown.
         """
         self.cancel_task(reason="Refreshing")
-        mention = None
-        if self.was_scheduled:
-            dankers = self.get_dankers()
-            mention = " ".join([danker.mention for danker in dankers])
-        await self.start(future, mention=mention)
+        await self.start(future)
 
     async def countdown(self):
         """
