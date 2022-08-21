@@ -103,7 +103,7 @@ class Dank:
         Starts the dank.
         """
         self.update_future(future)
-        await self.initialize(mention)
+        await self.initialize(mention=mention)
 
     def update_future(self, future: datetime.datetime):
         """
@@ -224,9 +224,10 @@ class Dank:
                 set_value("no_dankers_consecutive", 0)
             else:
                 # start the dank up again
-                client.now = datetime.datetime.utcnow()
+                client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
                 self.message = None
-                await self.start(client.now + DEFAULT_DELTA, mention=mention)
+                asyncio.create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
+                return
         else:
             no_dankers = get_value("no_dankers", 0)
             no_dankers += 1
