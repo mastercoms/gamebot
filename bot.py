@@ -83,20 +83,23 @@ class Dank:
     was_scheduled: Optional[bool]
 
     def __init__(self, channel: discord.TextChannel, author: discord.User):
-        self.group_buckets = dict()
-        for bucket in BUCKET_RANGE:
-            self.group_buckets[bucket] = set()
-        self.danker_buckets = dict()
+        self.reset()
 
         self.author = author
         self.channel = channel
         self.role = GAME_ROLES[DEFAULT_GAME]
 
-        self.message = None
         self.task = None
 
         self.has_initial = False
         self.was_scheduled = None
+
+    def reset(self):
+        self.group_buckets = dict()
+        for bucket in BUCKET_RANGE:
+            self.group_buckets[bucket] = set()
+        self.danker_buckets = dict()
+        self.message = None
 
     async def start(self, future: datetime.datetime, mention: str = None):
         """
@@ -225,7 +228,7 @@ class Dank:
             else:
                 # start the dank up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
-                self.message = None
+                self.reset()
                 asyncio.create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
