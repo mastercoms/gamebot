@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import math
 import os
 
 from typing import Dict, Set, List, Optional, Any
@@ -12,6 +13,10 @@ import arrow
 from discord import Intents
 from tinydb import TinyDB, Query
 from fuzzywuzzy import fuzz
+
+if os.name == "nt":
+    from colorama import init
+    init()
 
 intents = Intents.default()
 intents.message_content = True
@@ -274,9 +279,17 @@ class Dank:
         return bucket
 
 
-def get_int(s, default=0) -> int:
+def get_int(s: str, default: Optional[int]=0) -> int:
     try:
         val = int(s)
+        return val
+    except ValueError:
+        return default
+
+
+def get_float(s: str, default: Optional[float]=0.0) -> float:
+    try:
+        val = float(s)
         return val
     except ValueError:
         return default
@@ -293,6 +306,31 @@ class DankOptions:
 
 
 CURRENT_DANK_ARGS = {"cancel", "now", "leave"}
+
+HUMANIZE_VOWEL_WORDS = {"hour"}
+HUMANIZE_MAPPING = {
+    "years": (12.0, "months"),
+    "months": (4.0, "weeks"),
+    "weeks": (7.0, "days"),
+    "days": (24.0, "hours"),
+    "hours": (60.0, "minutes"),
+    "minutes": (60.0, "seconds")
+}
+
+
+def convert_humanize_decimal(quantity: float, unit: str) -> str:
+    frac, whole = math.modf(quantity)
+    base = f"{int(quantity)} {unit}"
+    # if this isn't a significant float, then we can just return it back
+    if abs(frac) <= 0.01:
+        return base
+    mapping = HUMANIZE_MAPPING.get(unit)
+    # if there's no further conversion, we just deal with the lower precision
+    if not mapping:
+        return base
+    conversion, lesser_unit = mapping
+    lesser_quantity = frac * conversion
+    return f"{base}, {convert_humanize_decimal(lesser_quantity, lesser_unit)}"
 
 
 async def consume_args(args: List[str], danker: discord.Member, options: DankOptions) -> Optional[DankOptions]:
@@ -333,7 +371,7 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                         # go to next arg
                         end += 1
                         # we made a new date
-                        if attempt_date:
+                        if attempt_date and confirmed_date != attempt_date:
                             # now we know our new start
                             new_start = end
                             confirmed_date = attempt_date
@@ -356,7 +394,24 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                     confirmed_date = None
                     # go through until we get a date
                     while True:
-                        datestring += " " + args[end]
+                        word = args[end]
+                        # need to replace 1 with "a" or "an" depending on the next word if there is one
+                        if last > end + 1:
+                            if word == "1":
+                                noun = args[end + 1]
+                                if not noun.endswith("s"):
+                                    if noun in HUMANIZE_VOWEL_WORDS:
+                                        word = "an"
+                                    else:
+                                        word = "a"
+                            else:
+                                parsed_num = get_float(word, default=None)
+                                if parsed_num is not None:
+                                    noun = args[end + 1]
+                                    word = convert_humanize_decimal(parsed_num, noun)
+                                    # we also consumed the next word
+                                    end += 1
+                        datestring += " " + word
                         try:
                             attempt_date = arw.dehumanize(datestring, locale="en")
                         except ValueError:
@@ -365,7 +420,7 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                         # go to next arg
                         end += 1
                         # we made a new date
-                        if attempt_date:
+                        if attempt_date and confirmed_date != attempt_date.datetime:
                             # now we know our new start
                             new_start = end
                             confirmed_date = attempt_date.datetime

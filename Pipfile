@@ -12,6 +12,7 @@ fuzzywuzzy = "*"
 dateparser = "*"
 python-levenshtein = "*"
 uvloop = {version = "*", sys_platform = "!= 'win32'"}
+colorama = {version = "*", sys_platform = "== 'win32'"}
 tinydb = "*"
 
 [requires]
