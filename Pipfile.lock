@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "1483e40b11f2a798995ea0d5bce177000d42d49b6295e0699324231f120c2498"
+            "sha256": "ba52677a2d8fc1c57af5b022e50a2090c62c80ba1bb86dc1f8ad1d0b51a40180"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -232,14 +232,6 @@
             "markers": "python_version >= '3.7'",
             "version": "==1.3.1"
         },
-        "fuzzywuzzy": {
-            "hashes": [
-                "sha256:45016e92264780e58972dca1b3d939ac864b78437422beecebb3095f8efd00e8",
-                "sha256:928244b28db720d1e0ee7587acf660ea49d7e4c632569cad4f1cd7e68a5f0993"
-            ],
-            "index": "pypi",
-            "version": "==0.18.0"
-        },
         "idna": {
             "hashes": [
                 "sha256:84d9dd047ffa80596e0f246e2eab0b391788b0503584e8945f2368256d2735ff",
@@ -438,6 +430,17 @@
             ],
             "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3'",
             "version": "==1.16.0"
+        },
+        "thefuzz": {
+            "extras": [
+                "speedup"
+            ],
+            "hashes": [
+                "sha256:4fcdde8e40f5ca5e8106bc7665181f9598a9c8b18b0a4d38c41a095ba6788972",
+                "sha256:6f7126db2f2c8a54212b05e3a740e45f4291c497d75d20751728f635bb74aa3d"
+            ],
+            "index": "pypi",
+            "version": "==0.19.0"
         },
         "tinydb": {
             "hashes": [

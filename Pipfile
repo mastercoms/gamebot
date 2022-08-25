@@ -8,12 +8,12 @@ verify_ssl = true
 [packages]
 discord = "*"
 arrow = "*"
-fuzzywuzzy = "*"
 dateparser = "*"
 python-levenshtein = "*"
 uvloop = {version = "*", sys_platform = "!= 'win32'"}
 colorama = {version = "*", sys_platform = "== 'win32'"}
 tinydb = "*"
+thefuzz = {extras = ["speedup"], version = "*"}
 
 [requires]
 python_version = "3.10"

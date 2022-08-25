@@ -12,7 +12,7 @@ import arrow
 
 from discord import Intents
 from tinydb import TinyDB, Query
-from fuzzywuzzy import fuzz
+from thefuzz import fuzz
 
 if os.name == "nt":
     from colorama import init
@@ -448,7 +448,12 @@ TOKEN_WORD = "dank"
 
 def is_dank(content: str) -> bool:
     word = content.split(" ")[0]
-    return word.startswith(TOKEN_WORD) or fuzz.ratio(word, TOKEN_WORD)
+    if word.startswith(TOKEN_WORD):
+        return True
+    if not word.startswith(TOKEN_WORD[0]):
+        return False
+    ratio = fuzz.ratio(word, TOKEN_WORD)
+    return ratio > 70
 
 
 @client.event
