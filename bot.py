@@ -318,10 +318,12 @@ HUMANIZE_MAPPING = {
 }
 HUMANIZE_SHORTHAND = {
     "mins": "minutes",
+    "min": "minutes",
     "m": "minutes",
     "h": "hours",
     "d": "days",
     "secs": "seconds",
+    "sec": "seconds",
     "s": "seconds"
 }
 NUMERIC = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "."}
@@ -410,8 +412,8 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                             for i, c in enumerate(word):
                                 if c not in NUMERIC:
                                     break
-                            word = word[:i]
                             args.insert(end + 1, word[i:])
+                            word = word[:i]
                             last = len(args)
                         # need to replace 1 with "a" or "an" depending on the next word if there is one
                         if last > end + 1:
