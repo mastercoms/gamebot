@@ -491,7 +491,8 @@ async def on_message(message):
                 client.now = message.created_at
 
             # set up our arg parser
-            args = "".join(message.content.split(" ")[1:]).split(" ")
+            args = " ".join(message.content.split(" ")[1:]).split(" ")
+            print(args)
             danker = message.author
             options = DankOptions()
 
