@@ -468,7 +468,7 @@ TOKEN_WORD = "dank"
 
 
 def is_dank(content: str) -> bool:
-    word = content.split(" ")[0]
+    word = content.split()[0]
     if word.startswith(TOKEN_WORD):
         return True
     if not word.startswith(TOKEN_WORD[0]):
@@ -491,8 +491,7 @@ async def on_message(message):
                 client.now = message.created_at
 
             # set up our arg parser
-            args = " ".join(message.content.split(" ")[1:]).split(" ")
-            print(args)
+            args = message.content.split()[1:]
             danker = message.author
             options = DankOptions()
 
