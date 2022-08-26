@@ -316,6 +316,15 @@ HUMANIZE_MAPPING = {
     "hours": (60.0, "minutes"),
     "minutes": (60.0, "seconds")
 }
+HUMANIZE_SHORTHAND = {
+    "mins": "minutes",
+    "m": "minutes",
+    "h": "hours",
+    "d": "days",
+    "secs": "seconds",
+    "s": "seconds"
+}
+NUMERIC = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "."}
 
 
 def convert_humanize_decimal(quantity: float, unit: str) -> str:
@@ -395,10 +404,23 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                     # go through until we get a date
                     while True:
                         word = args[end]
+                        # if it's a shorthand quantity, ex. 1h, 5m
+                        if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
+                            i = 0
+                            for i, c in enumerate(word):
+                                if c not in NUMERIC:
+                                    break
+                            word = word[:i]
+                            args.insert(end + 1, word[i:])
+                            last = len(args)
                         # need to replace 1 with "a" or "an" depending on the next word if there is one
                         if last > end + 1:
+                            noun = args[end + 1]
+                            longform_noun = HUMANIZE_SHORTHAND.get(noun)
+                            if longform_noun is not None:
+                                noun = longform_noun
+                                args[end + 1] = noun
                             if word == "1":
-                                noun = args[end + 1]
                                 if not noun.endswith("s"):
                                     if noun in HUMANIZE_VOWEL_WORDS:
                                         word = "an"
@@ -407,7 +429,6 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
                             else:
                                 parsed_num = get_float(word, default=None)
                                 if parsed_num is not None:
-                                    noun = args[end + 1]
                                     word = convert_humanize_decimal(parsed_num, noun)
                                     # we also consumed the next word
                                     end += 1
@@ -470,7 +491,7 @@ async def on_message(message):
                 client.now = message.created_at
 
             # set up our arg parser
-            args = message.content.split(" ")[1:]
+            args = "".join(message.content.split(" ")[1:]).split(" ")
             danker = message.author
             options = DankOptions()
 
