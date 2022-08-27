@@ -289,8 +289,6 @@ class Dank:
         self.cancel_task(reason="Advancing")
         if self.is_checking:
             await self.update_timestamp(now)
-        else:
-            self.is_checking = True
         await self.finish()
 
     def get_dankers(self) -> Set:
