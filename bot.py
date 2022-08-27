@@ -156,7 +156,7 @@ class Dank:
             short_time = print_timestamp(self.timestamp, 't')
             msg = f"{self.base_mention} {name} scheduled a dank at {short_time} ({relative_time})."
         if self.message:
-            await self.message.edit(content=msg)
+            await self.update_message(msg)
         else:
             self.message = await self.channel.send(msg)
         self.start_countdown()
@@ -166,6 +166,12 @@ class Dank:
 
     def get_delta_seconds(self) -> float:
         return self.get_delta().total_seconds()
+
+    async def update_message(self, content: str):
+        self.message = await self.message.edit(content=content)
+
+    async def replace_message(self, old: str, new: str):
+        await self.update_message(self.message.content.replace(old, new))
 
     async def add_danker(self, danker: discord.Member, min_bucket: int):
         # out of bounds buckets
@@ -256,7 +262,7 @@ class Dank:
             await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row).")
             await self.channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
         # make it past tense
-        await self.message.edit(content=self.message.content.replace("expires", "expired"))
+        await self.replace_message("expires", "expired")
         client.current_dank = None
 
     def cancel_task(self, reason: str = "Cancelled"):
@@ -268,12 +274,12 @@ class Dank:
         old_relative_time = str(self.timestamp)
         self.update_future(new_future)
         new_relative_time = str(self.timestamp)
-        await self.message.edit(content=self.message.content.replace(old_relative_time, new_relative_time))
+        await self.replace_message(old_relative_time, new_relative_time)
 
     async def cancel(self, now: datetime.datetime):
         self.cancel_task()
         await self.update_timestamp(now)
-        await self.message.edit(content=self.message.content.replace("expires", "cancelled"))
+        await self.replace_message("expires", "cancelled")
         client.current_dank = None
         await self.channel.send("Dank cancelled.")
 
