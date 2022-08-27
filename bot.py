@@ -261,8 +261,9 @@ class Dank:
             no_dankers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
             await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row).")
             await self.channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
-        # make it past tense
-        await self.replace_message("expires", "expired")
+        if self.is_checking:
+            # make it past tense
+            await self.replace_message("expires", "expired")
         client.current_dank = None
 
     def cancel_task(self, reason: str = "Cancelled"):
@@ -278,8 +279,9 @@ class Dank:
 
     async def cancel(self, now: datetime.datetime):
         self.cancel_task()
-        await self.update_timestamp(now)
-        await self.replace_message("expires", "cancelled")
+        if self.is_checking:
+            await self.update_timestamp(now)
+            await self.replace_message("expires", "cancelled")
         client.current_dank = None
         await self.channel.send("Dank cancelled.")
 
