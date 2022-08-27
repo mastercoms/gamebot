@@ -3,7 +3,7 @@ import dataclasses
 import math
 import os
 
-from typing import Dict, Set, List, Optional, Any
+from typing import Dict, Set, List, Optional, Any, Callable
 
 import discord
 import datetime
@@ -31,7 +31,7 @@ client.db = TinyDB("./db.json")
 Store = Query()
 
 
-def get_value(key: str, default: Any = None) -> Dict[str, Any]:
+def get_value(key: str, default: Any = None) -> Any:
     res = client.db.get(Store.k == key)
     if res:
         return res["v"]
@@ -41,6 +41,12 @@ def get_value(key: str, default: Any = None) -> Dict[str, Any]:
 
 def set_value(key: str, val: Any):
     client.db.upsert({"k": key, "v": val}, Store.k == key)
+
+
+def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None) -> Any:
+    old = get_value(key, default)
+    set_value(key, update_fn(old))
+    return old
 
 
 LOCAL_TIMEZONE = "US/Eastern"
@@ -77,6 +83,10 @@ GAME_ROLES = {
 }
 GAMES = list(GAME_ROLES.keys())
 DEFAULT_GAME = GAMES[0]
+
+
+def increment(val: int) -> int:
+    return val + 1
 
 
 class Dank:
@@ -182,7 +192,7 @@ class Dank:
             if self.is_checking:
                 msg = f"{name} is ready to dank{with_str}. {size}"
                 countdown = self.get_delta_seconds()
-                if 1 < countdown < DEFAULT_COUNTDOWN:
+                if 5 < countdown < DEFAULT_COUNTDOWN:
                     missing_countdown = datetime.timedelta(seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds())
                     await self.refresh(self.future + missing_countdown)
             else:
@@ -241,27 +251,38 @@ class Dank:
                 asyncio.create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
-            no_dankers = get_value("no_dankers", 0)
-            no_dankers += 1
-            set_value("no_dankers", no_dankers)
-            no_dankers_consecutive = get_value("no_dankers_consecutive", 0)
-            no_dankers_consecutive += 1
-            set_value("no_dankers_consecutive", no_dankers_consecutive)
+            no_dankers = update_value(increment, "no_dankers", 0)
+            no_dankers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
             await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row).")
             await self.channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
+        # make it past tense
+        await self.message.edit(content=self.message.content.replace("expires", "expired"))
         client.current_dank = None
 
     def cancel_task(self, reason: str = "Cancelled"):
         self.task.cancel(msg=reason)
 
-    async def cancel(self):
+    async def update_timestamp(self, new_future: datetime.datetime):
+        if self.message is None:
+            return
+        old_relative_time = str(self.timestamp)
+        self.update_future(new_future)
+        new_relative_time = str(self.timestamp)
+        await self.message.edit(content=self.message.content.replace(old_relative_time, new_relative_time))
+
+    async def cancel(self, now: datetime.datetime):
         self.cancel_task()
+        await self.update_timestamp(now)
+        await self.message.edit(content=self.message.content.replace("expires", "cancelled"))
         client.current_dank = None
         await self.channel.send("Dank cancelled.")
 
-    async def advance(self):
+    async def advance(self, now: datetime.datetime):
         self.cancel_task(reason="Advancing")
-        self.is_checking = True
+        if self.is_checking:
+            await self.update_timestamp(now)
+        else:
+            self.is_checking = True
         await self.finish()
 
     def get_dankers(self) -> Set:
@@ -279,7 +300,7 @@ class Dank:
         return bucket
 
 
-def get_int(s: str, default: Optional[int]=0) -> int:
+def get_int(s: str, default: Optional[int] = 0) -> int:
     try:
         val = int(s)
         return val
@@ -287,7 +308,7 @@ def get_int(s: str, default: Optional[int]=0) -> int:
         return default
 
 
-def get_float(s: str, default: Optional[float]=0.0) -> float:
+def get_float(s: str, default: Optional[float] = 0.0) -> float:
     try:
         val = float(s)
         return val
@@ -333,7 +354,7 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
     frac, whole = math.modf(quantity)
     base = f"{int(quantity)} {unit}"
     # if this isn't a significant float, then we can just return it back
-    if abs(frac) <= 0.01:
+    if abs(frac) < 0.1:
         return base
     mapping = HUMANIZE_MAPPING.get(unit)
     # if there's no further conversion, we just deal with the lower precision
@@ -344,14 +365,14 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
     return f"{base}, {convert_humanize_decimal(lesser_quantity, lesser_unit)}"
 
 
-async def consume_args(args: List[str], danker: discord.Member, options: DankOptions) -> Optional[DankOptions]:
+async def consume_args(args: List[str], danker: discord.Member, created_at: datetime.datetime, options: DankOptions) -> Optional[DankOptions]:
     control = args.pop(0)
     if client.current_dank:
         if control == "cancel":
-            await client.current_dank.cancel()
+            await client.current_dank.cancel(created_at)
             return None
         if control == "now":
-            await client.current_dank.advance()
+            await client.current_dank.advance(created_at)
             return None
         if control == "leave":
             await client.current_dank.remove_danker(danker)
@@ -364,7 +385,6 @@ async def consume_args(args: List[str], danker: discord.Member, options: DankOpt
         if args:
             # future date handling
             if options.future is None:
-                # TODO: deduplicate
                 if control == "at":
                     datestring = ""
                     end = 0
@@ -499,7 +519,7 @@ async def on_message(message):
 
             # consume all args
             while args:
-                options = await consume_args(args, danker, options)
+                options = await consume_args(args, danker, message.created_at, options)
                 # if we cleared options, then we stop here
                 if not options:
                     return
