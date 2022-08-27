@@ -490,7 +490,7 @@ TOKEN_WORD = "dank"
 
 
 def is_dank(content: str) -> bool:
-    word = content.split()[0]
+    word = content.split(maxsplit=1)[0]
     if word.startswith(TOKEN_WORD):
         return True
     if not word.startswith(TOKEN_WORD[0]):
@@ -501,9 +501,15 @@ def is_dank(content: str) -> bool:
 
 @client.event
 async def on_message(message):
-    if message.author == client.user or message.author.bot:
+    # not a bot
+    if message.author.bot:
         return
 
+    # if only an embed, then there's no content to parse
+    if not message.content:
+        return
+
+    # normalize
     message.content = message.content.lower()
 
     if is_dank(message.content):
