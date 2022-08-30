@@ -161,11 +161,11 @@
         },
         "discord.py": {
             "hashes": [
-                "sha256:18b06870bdc85d29e0d55f4a4b2abe9d7cdae2b197e23d49f82886ba27ba1aec",
-                "sha256:c36f26935938194c3465c2abf8ecfbbf5560c50b189f1b746d6f00d1e78c0d3b"
+                "sha256:309146476e986cb8faf038cd5d604d4b3834ef15c2d34df697ce5064bf5cd779",
+                "sha256:aeb186348bf011708b085b2715cf92bbb72c692eb4f59c4c0b488130cc4c4b7e"
             ],
             "markers": "python_full_version >= '3.8.0'",
-            "version": "==2.0.0"
+            "version": "==2.0.1"
         },
         "frozenlist": {
             "hashes": [
