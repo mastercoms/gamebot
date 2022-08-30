@@ -25,7 +25,7 @@ client = discord.Client(intents=intents)
 client.current_dank = None
 client.now = None
 
-client.lock = asyncio.Lock()
+client.lock = None
 
 client.db = TinyDB("./db.json")
 Store = Query()
@@ -45,8 +45,9 @@ def set_value(key: str, val: Any):
 
 def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None) -> Any:
     old = get_value(key, default)
-    set_value(key, update_fn(old))
-    return old
+    new = update_fn(old)
+    set_value(key, new)
+    return new
 
 
 LOCAL_TIMEZONE = "US/Eastern"
@@ -506,6 +507,11 @@ def is_dank(content: str) -> bool:
 
 
 @client.event
+async def on_ready():
+    client.lock = asyncio.Lock()
+
+
+@client.event
 async def on_message(message):
     # not a bot
     if message.author.bot:
@@ -519,10 +525,10 @@ async def on_message(message):
     message.content = message.content.lower()
 
     if is_dank(message.content):
+        # technically on_ready might not have fired yet to create the lock, but this only happens during init
         async with client.lock:
-            if not client.current_dank:
-                # set our global now to when the message was made
-                client.now = message.created_at
+            # set our global now to when the message was made
+            client.now = message.created_at
 
             # set up our arg parser
             args = message.content.split()[1:]
