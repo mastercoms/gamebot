@@ -14,6 +14,12 @@ from discord import Intents
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+
 if os.name == "nt":
     from colorama import init
     init()
