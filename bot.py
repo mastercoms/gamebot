@@ -10,7 +10,8 @@ import datetime
 import dateparser
 import arrow
 
-from discord import Intents
+from BetterJSONStorage import BetterJSONStorage
+from discord import Intents, AllowedMentions
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
@@ -24,16 +25,36 @@ if os.name == "nt":
     from colorama import init
     init()
 
-intents = Intents.default()
+
+class DankClient(discord.Client):
+    async def setup_hook(self) -> None:
+        await super().setup_hook()
+        client.lock = asyncio.Lock()
+
+
+intents = Intents.none()
+intents.guild_messages = True
+intents.guilds = True
+intents.members = True
 intents.message_content = True
-client = discord.Client(intents=intents)
+
+mentions = AllowedMentions.none()
+mentions.users = True
+mentions.roles = True
+
+client = DankClient(
+    max_messages=500,
+    intents=intents,
+    allowed_mentions=mentions,
+)
 
 client.current_dank = None
 client.now = None
 
 client.lock = None
 
-client.db = TinyDB("./db.json")
+client.db = TinyDB("./db.json", access_mode="r+", storage=BetterJSONStorage)
+client.backup_table = client.db.table("backup")
 Store = Query()
 
 
@@ -102,6 +123,7 @@ class Dank:
     future: datetime.datetime
     timestamp: int
     is_checking: bool
+    author: discord.Member
     channel: discord.TextChannel
     role: int
     message: Optional[discord.Message]
@@ -110,7 +132,7 @@ class Dank:
     was_scheduled: Optional[bool]
     base_mention: Optional[str]
 
-    def __init__(self, channel: discord.TextChannel, author: discord.User):
+    def __init__(self, channel: discord.TextChannel, author: discord.Member):
         self.reset()
 
         self.author = author
@@ -121,6 +143,23 @@ class Dank:
 
         self.has_initial = False
         self.was_scheduled = None
+
+    def save(self):
+        data = {
+            "group_buckets": {k: {m.id for m in v} for k, v in self.group_buckets.items()},
+            "danker_buckets": {k.id: v for k, v in self.danker_buckets.items()},
+            "future": self.future.isoformat(),
+            "timestamp": self.timestamp,
+            "is_checking": self.is_checking,
+            "author": self.author.id,
+            "channel": self.channel.id,
+            "role": self.role,
+            "message": self.message.id,
+            "has_initial": self.has_initial,
+            "was_scheduled": self.was_scheduled,
+            "base_mention": self.base_mention
+        }
+        client.backup_table.upsert({"k": "saved", "v": data}, Store.k == "saved")
 
     def reset(self):
         self.group_buckets = dict()
@@ -136,6 +175,7 @@ class Dank:
         """
         self.update_future(future)
         await self.initialize(mention=mention)
+        self.save()
 
     def update_future(self, future: datetime.datetime):
         """
@@ -216,6 +256,8 @@ class Dank:
         else:
             self.has_initial = True
 
+        self.save()
+
     async def remove_danker(self, danker: discord.Member, notify: bool = True):
         # pop off the danker lookup
         min_bucket = self.danker_buckets.pop(danker)
@@ -226,6 +268,8 @@ class Dank:
 
         if notify:
             await self.channel.send("You left the dank.")
+
+        self.save()
 
     def start_countdown(self):
         self.task = asyncio.create_task(self.countdown(), name="Countdown")
@@ -272,6 +316,7 @@ class Dank:
             # make it past tense
             await self.replace_message("expires", "expired")
         client.current_dank = None
+        client.backup_table.truncate()
 
     def cancel_task(self, reason: str = "Cancelled"):
         self.task.cancel(msg=reason)
@@ -290,6 +335,7 @@ class Dank:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_dank = None
+        client.backup_table.truncate()
         await self.channel.send("Dank cancelled.")
 
     async def advance(self, now: datetime.datetime):
@@ -298,7 +344,7 @@ class Dank:
             await self.update_timestamp(now)
         await self.finish()
 
-    def get_dankers(self) -> Set:
+    def get_dankers(self) -> Set[discord.Member]:
         bucket = set()
         # count down from the biggest bucket, so we can stop at the biggest that satisfies
         for i in reversed(BUCKET_RANGE):
@@ -399,19 +445,19 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
             # future date handling
             if options.future is None:
                 if control == "at":
-                    datestring = ""
+                    date_string = ""
                     end = 0
                     new_start = 0
                     last = len(args)
                     confirmed_date = None
                     # go through until we get a date
                     while True:
-                        datestring += " " + args[end] if datestring else args[end]
+                        date_string += " " + args[end] if date_string else args[end]
                         settings = {
                             'TIMEZONE': LOCAL_TIMEZONE,
                             'TO_TIMEZONE': 'UTC'
                         }
-                        attempt_date = dateparser.parse(datestring, languages=["en"], settings=settings)
+                        attempt_date = dateparser.parse(date_string, languages=["en"], settings=settings)
                         # go to next arg
                         end += 1
                         # we made a new date
@@ -431,7 +477,7 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                     return options
                 if control == "in":
                     arw = arrow.get(client.now)
-                    datestring = "in"
+                    date_string = "in"
                     end = 0
                     new_start = 0
                     last = len(args)
@@ -467,9 +513,9 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                                     word = convert_humanize_decimal(parsed_num, noun)
                                     # we also consumed the next word
                                     end += 1
-                        datestring += " " + word
+                        date_string += " " + word
                         try:
-                            attempt_date = arw.dehumanize(datestring, locale="en")
+                            attempt_date = arw.dehumanize(date_string, locale="en")
                         except ValueError:
                             # didn't work
                             attempt_date = None
@@ -514,7 +560,33 @@ def is_dank(content: str) -> bool:
 
 @client.event
 async def on_ready():
-    client.lock = asyncio.Lock()
+    guild = None
+    for guild in client.guilds:
+        pass
+    if guild is None:
+        return
+    client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
+    for save in client.backup_table.all():
+        future = datetime.datetime.fromisoformat(save["future"])
+        if client.now >= future:
+            break
+        channel = guild.get_channel(save["channel"])
+        author = guild.get_member(save["author"])
+        restored_dank = Dank(channel, author)
+        restored_dank.group_buckets = {k: {guild.get_member(m) for m in v} for k, v in save["group_buckets"]}
+        restored_dank.danker_buckets = {guild.get_member(k): v for k, v in save["danker_buckets"]}
+        restored_dank.future = future
+        restored_dank.timestamp = save["timestamp"]
+        restored_dank.is_checking = save["is_checking"]
+        restored_dank.role = save["role"]
+        restored_dank.message = await channel.fetch_message(save["message"])
+        restored_dank.has_initial = save["has_initial"]
+        restored_dank.was_scheduled = save["was_scheduled"]
+        restored_dank.base_mention = save["base_mention"]
+        client.current_dank = restored_dank
+        client.current_dank.start_countdown()
+        break
+    client.backup_table.truncate()
 
 
 @client.event
@@ -531,7 +603,6 @@ async def on_message(message):
     message.content = message.content.lower()
 
     if is_dank(message.content):
-        # technically on_ready might not have fired yet to create the lock, but this only happens during init
         async with client.lock:
             # set our global now to when the message was made
             client.now = message.created_at
