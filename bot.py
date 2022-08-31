@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import math
 import os
+import pathlib
 
 from typing import Dict, Set, List, Optional, Any, Callable
 
@@ -15,15 +16,12 @@ from discord import Intents, AllowedMentions
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
-try:
+if os.name == "nt":
+    import colorama
+    colorama.init()
+else:
     import uvloop
     uvloop.install()
-except ImportError:
-    pass
-
-if os.name == "nt":
-    from colorama import init
-    init()
 
 
 class DankClient(discord.Client):
@@ -53,7 +51,7 @@ client.now = None
 
 client.lock = None
 
-client.db = TinyDB("./db.json", access_mode="r+", storage=BetterJSONStorage)
+client.db = TinyDB(pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage)
 client.backup_table = client.db.table("backup")
 Store = Query()
 
@@ -146,8 +144,8 @@ class Dank:
 
     def save(self):
         data = {
-            "group_buckets": {k: {m.id for m in v} for k, v in self.group_buckets.items()},
-            "danker_buckets": {k.id: v for k, v in self.danker_buckets.items()},
+            "group_buckets": {str(k): [m.id for m in v] for k, v in self.group_buckets.items()},
+            "danker_buckets": {str(k.id): v for k, v in self.danker_buckets.items()},
             "future": self.future.isoformat(),
             "timestamp": self.timestamp,
             "is_checking": self.is_checking,
@@ -285,7 +283,9 @@ class Dank:
         """
         Sleeps for the countdown time, and then finishes the dank.
         """
-        await asyncio.sleep(self.get_delta_seconds())
+        delta = self.get_delta_seconds()
+        if delta >= 0.01:
+            await asyncio.sleep(self.get_delta_seconds())
         await self.finish()
 
     async def finish(self):
@@ -567,15 +567,13 @@ async def on_ready():
         return
     client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
     for save in client.backup_table.all():
-        future = datetime.datetime.fromisoformat(save["future"])
-        if client.now >= future:
-            break
+        save = save["v"]
         channel = guild.get_channel(save["channel"])
         author = guild.get_member(save["author"])
         restored_dank = Dank(channel, author)
-        restored_dank.group_buckets = {k: {guild.get_member(m) for m in v} for k, v in save["group_buckets"]}
-        restored_dank.danker_buckets = {guild.get_member(k): v for k, v in save["danker_buckets"]}
-        restored_dank.future = future
+        restored_dank.group_buckets = {int(k): {guild.get_member(m) for m in v} for k, v in save["group_buckets"].items()}
+        restored_dank.danker_buckets = {guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()}
+        restored_dank.future = datetime.datetime.fromisoformat(save["future"])
         restored_dank.timestamp = save["timestamp"]
         restored_dank.is_checking = save["is_checking"]
         restored_dank.role = save["role"]
