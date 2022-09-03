@@ -3,9 +3,11 @@ import dataclasses
 import math
 import os
 import pathlib
+import socket
 
 from typing import Dict, Set, List, Optional, Any, Callable
 
+import aiohttp
 import discord
 import datetime
 import dateparser
@@ -25,34 +27,108 @@ else:
 
 
 class DankClient(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._resolver: Optional[aiohttp.AsyncResolver] = None
+        self._connector: Optional[aiohttp.TCPConnector] = None
+
+        self.current_dank: Optional[Dank] = None
+        self.now: Optional[datetime.datetime] = None
+
+        self.lock: Optional[asyncio.Lock] = None
+
+        self.db = TinyDB(pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage)
+        self.backup_table = self.db.table("backup")
+
     async def setup_hook(self) -> None:
         await super().setup_hook()
-        client.lock = asyncio.Lock()
+
+        self._resolver = aiohttp.AsyncResolver()
+        self._connector = aiohttp.TCPConnector(
+            resolver=self._resolver,
+            family=socket.AF_INET,
+        )
+        self.http.connector = self._connector
+
+        self.lock = asyncio.Lock()
+
+    async def on_ready(self):
+        guild = None
+        for guild in self.guilds:
+            break
+        if guild is None:
+            return
+        self.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
+        for save in self.backup_table.all():
+            save = save["v"]
+            channel = guild.get_channel(save["channel"])
+            author = guild.get_member(save["author"])
+            restored_dank = Dank(channel, author)
+            restored_dank.group_buckets = {int(k): {guild.get_member(m) for m in v} for k, v in
+                                           save["group_buckets"].items()}
+            restored_dank.danker_buckets = {guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()}
+            restored_dank.future = datetime.datetime.fromisoformat(save["future"])
+            restored_dank.timestamp = save["timestamp"]
+            restored_dank.is_checking = save["is_checking"]
+            restored_dank.role = save["role"]
+            restored_dank.message = await channel.fetch_message(save["message"])
+            restored_dank.has_initial = save["has_initial"]
+            restored_dank.was_scheduled = save["was_scheduled"]
+            restored_dank.base_mention = save["base_mention"]
+            self.current_dank = restored_dank
+            self.current_dank.start_countdown()
+            break
+        self.backup_table.truncate()
+
+    async def on_message(self, message):
+        # not a bot
+        if message.author.bot:
+            return
+
+        # if only an embed, then there's no content to parse
+        if not message.content:
+            return
+
+        # normalize
+        message.content = message.content.lower()
+
+        if is_dank(message.content):
+            async with self.lock:
+                # set our global now to when the message was made
+                self.now = message.created_at
+
+                # set up our arg parser
+                args = message.content.split()[1:]
+                danker = message.author
+                options = DankOptions()
+
+                # consume all args
+                while args:
+                    options = await consume_args(args, danker, message.created_at, options)
+                    # if we cleared options, then we stop here
+                    if not options:
+                        return
+
+                # are we going to start a dank?
+                if not self.current_dank:
+                    # check if it's sufficiently in the future
+                    if options.future:
+                        delta = options.future - self.now
+                        if delta < DEFAULT_DELTA:
+                            options.future = None
+                    # if didn't get a date, default to delta
+                    if not options.future:
+                        options.future = self.now + DEFAULT_DELTA
+                    self.current_dank = Dank(message.channel, danker)
+                    await self.current_dank.start(options.future)
+
+                # add to dank
+                await self.current_dank.add_danker(message.author, options.bucket)
 
 
-intents = Intents.none()
-intents.guild_messages = True
-intents.guilds = True
-intents.members = True
-intents.message_content = True
+client: Optional[DankClient] = None
 
-mentions = AllowedMentions.none()
-mentions.users = True
-mentions.roles = True
-
-client = DankClient(
-    max_messages=500,
-    intents=intents,
-    allowed_mentions=mentions,
-)
-
-client.current_dank = None
-client.now = None
-
-client.lock = None
-
-client.db = TinyDB(pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage)
-client.backup_table = client.db.table("backup")
 Store = Query()
 
 
@@ -558,80 +634,25 @@ def is_dank(content: str) -> bool:
     return ratio > 70
 
 
-@client.event
-async def on_ready():
-    guild = None
-    for guild in client.guilds:
-        pass
-    if guild is None:
-        return
-    client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
-    for save in client.backup_table.all():
-        save = save["v"]
-        channel = guild.get_channel(save["channel"])
-        author = guild.get_member(save["author"])
-        restored_dank = Dank(channel, author)
-        restored_dank.group_buckets = {int(k): {guild.get_member(m) for m in v} for k, v in save["group_buckets"].items()}
-        restored_dank.danker_buckets = {guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()}
-        restored_dank.future = datetime.datetime.fromisoformat(save["future"])
-        restored_dank.timestamp = save["timestamp"]
-        restored_dank.is_checking = save["is_checking"]
-        restored_dank.role = save["role"]
-        restored_dank.message = await channel.fetch_message(save["message"])
-        restored_dank.has_initial = save["has_initial"]
-        restored_dank.was_scheduled = save["was_scheduled"]
-        restored_dank.base_mention = save["base_mention"]
-        client.current_dank = restored_dank
-        client.current_dank.start_countdown()
-        break
-    client.backup_table.truncate()
+async def main():
+    global client
 
+    intents = Intents.none()
+    intents.guild_messages = True
+    intents.guilds = True
+    intents.members = True
+    intents.message_content = True
 
-@client.event
-async def on_message(message):
-    # not a bot
-    if message.author.bot:
-        return
+    mentions = AllowedMentions.none()
+    mentions.users = True
+    mentions.roles = True
 
-    # if only an embed, then there's no content to parse
-    if not message.content:
-        return
+    client = DankClient(
+        max_messages=500,
+        intents=intents,
+        allowed_mentions=mentions,
+    )
+    async with client as _client:
+        await _client.start(os.environ['DANK_TOKEN'])
 
-    # normalize
-    message.content = message.content.lower()
-
-    if is_dank(message.content):
-        async with client.lock:
-            # set our global now to when the message was made
-            client.now = message.created_at
-
-            # set up our arg parser
-            args = message.content.split()[1:]
-            danker = message.author
-            options = DankOptions()
-
-            # consume all args
-            while args:
-                options = await consume_args(args, danker, message.created_at, options)
-                # if we cleared options, then we stop here
-                if not options:
-                    return
-
-            # are we going to start a dank?
-            if not client.current_dank:
-                # check if it's sufficiently in the future
-                if options.future:
-                    delta = options.future - client.now
-                    if delta < DEFAULT_DELTA:
-                        options.future = None
-                # if didn't get a date, default to delta
-                if not options.future:
-                    options.future = client.now + DEFAULT_DELTA
-                client.current_dank = Dank(message.channel, danker)
-                await client.current_dank.start(options.future)
-
-            # add to dank
-            await client.current_dank.add_danker(message.author, options.bucket)
-
-
-client.run(os.environ['DANK_TOKEN'])
+asyncio.run(main())
