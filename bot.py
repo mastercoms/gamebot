@@ -48,6 +48,7 @@ class DankClient(discord.Client):
         self._connector = aiohttp.TCPConnector(
             resolver=self._resolver,
             family=socket.AF_INET,
+            limit=0,
         )
         self.http.connector = self._connector
 
