@@ -43,7 +43,7 @@ Either when starting it, or while it's started, you can say:
 
 `settings.json` explanation:
 
-```yaml
+```json5
 {
   // any tz timezone: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
   // used for parsing specified dates for "game at"
