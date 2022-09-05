@@ -30,7 +30,13 @@ else:
 
 
 class DankClient(discord.Client):
+    """
+    The Discord client for this bot.
+    """
     def __init__(self, *args, **kwargs):
+        """
+        Creates a new Discord client.
+        """
         super().__init__(*args, **kwargs)
 
         self._resolver: Optional[aiohttp.AsyncResolver] = None
@@ -47,6 +53,9 @@ class DankClient(discord.Client):
         self.backup_table = self.db.table("backup")
 
     async def setup_hook(self) -> None:
+        """
+        Sets up the async resolver and
+        """
         await super().setup_hook()
 
         self._resolver = aiohttp.AsyncResolver()
@@ -60,6 +69,9 @@ class DankClient(discord.Client):
         self.lock = asyncio.Lock()
 
     async def on_ready(self):
+        """
+        Resumes a saved dank.
+        """
         guild = None
         for guild in self.guilds:
             break
@@ -92,6 +104,9 @@ class DankClient(discord.Client):
         self.backup_table.truncate()
 
     async def on_message(self, message):
+        """
+        Handles new dank messages.
+        """
         # not a bot
         if message.author.bot:
             return
@@ -145,6 +160,9 @@ Store = Query()
 
 
 def get_value(key: str, default: Any = None) -> Any:
+    """
+    Gets from the key value DB table.
+    """
     res = client.db.get(Store.k == key)
     if res:
         return res["v"]
@@ -153,10 +171,17 @@ def get_value(key: str, default: Any = None) -> Any:
 
 
 def set_value(key: str, val: Any):
+    """
+    Sets to the key value DB table.
+    """
     client.db.upsert({"k": key, "v": val}, Store.k == key)
 
 
 def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None) -> Any:
+    """
+    Gets an existing value in the key value DB table and updates it using update_fn.
+    :return: The new value
+    """
     old = get_value(key, default)
     new = update_fn(old)
     set_value(key, new)
@@ -171,15 +196,24 @@ TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
 
 
 def generate_timestamp(dt: datetime.datetime) -> int:
+    """
+    Gets a UNIX timestamp representing a datetime.
+    """
     delta = dt - EPOCH
     return delta // TIMESTAMP_GRANULARITY
 
 
 def print_timestamp(timestamp: int, style: str) -> str:
+    """
+    Gets a Discord string representing a UNIX timestamp.
+    """
     return f"<t:{timestamp}:{style}>"
 
 
 def generate_datetime(timestamp: int) -> datetime.datetime:
+    """
+    Gets a datetime from UNIX timestamp.
+    """
     delta = datetime.timedelta(milliseconds=timestamp)
     return EPOCH + delta
 
@@ -199,10 +233,17 @@ DEFAULT_GAME = GAMES[0]
 
 
 def increment(val: int) -> int:
+    """
+    Increments a given int by 1, functionally.
+    """
     return val + 1
 
 
 class Dank:
+    """
+    Represents a pending/active Dank.
+    """
+
     group_buckets: Dict[int, Set[discord.Member]]
     danker_buckets: Dict[discord.Member, int]
     future: datetime.datetime
@@ -218,6 +259,9 @@ class Dank:
     base_mention: Optional[str]
 
     def __init__(self, channel: discord.TextChannel, author: discord.Member):
+        """
+        Creates a new Dank, to be started with start().
+        """
         self.reset()
 
         self.author = author
@@ -230,6 +274,11 @@ class Dank:
         self.was_scheduled = None
 
     def save(self):
+        """
+        Saves the Dank to disk, so that it may be resumed in case of a crash.
+
+        Must be called any time any of the class properties change.
+        """
         data = {
             "group_buckets": {
                 str(k): [m.id for m in v] for k, v in self.group_buckets.items()
@@ -249,6 +298,9 @@ class Dank:
         client.backup_table.upsert({"k": "saved", "v": data}, Store.k == "saved")
 
     def reset(self):
+        """
+        Resets the dank to require new confirmation, for starting a Dank Check.
+        """
         self.group_buckets = dict()
         for bucket in BUCKET_RANGE:
             self.group_buckets[bucket] = set()
@@ -296,18 +348,33 @@ class Dank:
         self.start_countdown()
 
     def get_delta(self) -> datetime.timedelta:
+        """
+        Gets the timedelta until the dank finishes.
+        """
         return self.future - client.now
 
     def get_delta_seconds(self) -> float:
+        """
+        Gets the number of seconds left until the dank finishes.
+        """
         return self.get_delta().total_seconds()
 
     async def update_message(self, content: str):
+        """
+        Directly edits the message and updates its reference.
+        """
         self.message = await self.message.edit(content=content)
 
     async def replace_message(self, old: str, new: str):
+        """
+        Used to replace content within the message.
+        """
         await self.update_message(self.message.content.replace(old, new))
 
     async def add_danker(self, danker: discord.Member, min_bucket: int):
+        """
+        Sets a danker to the specified buckets.
+        """
         # out of bounds buckets
         min_bucket = max(BUCKET_MIN, min(min_bucket, BUCKET_MAX))
 
@@ -348,6 +415,9 @@ class Dank:
         self.save()
 
     async def remove_danker(self, danker: discord.Member, notify: bool = True):
+        """
+        Removes a danker from all buckets.
+        """
         # pop off the danker lookup
         min_bucket = self.danker_buckets.pop(danker)
 
@@ -361,6 +431,9 @@ class Dank:
         self.save()
 
     def start_countdown(self):
+        """
+        Directly starts the asyncio countdown task.
+        """
         self.task = asyncio.create_task(self.countdown(), name="Countdown")
 
     async def refresh(self, future: datetime.datetime):
@@ -375,7 +448,8 @@ class Dank:
         Sleeps for the countdown time, and then finishes the dank.
         """
         delta = self.get_delta_seconds()
-        if delta >= 0.01:
+        # if our delta is less than 16 milliseconds, then we don't expect scheduling accuracy and thus don't sleep
+        if delta >= 0.016:
             await asyncio.sleep(self.get_delta_seconds())
         await self.finish()
 
@@ -420,9 +494,15 @@ class Dank:
         client.backup_table.truncate()
 
     def cancel_task(self, reason: str = "Cancelled"):
+        """
+        Directly cancels the asyncio countdown task.
+        """
         self.task.cancel(msg=reason)
 
     async def update_timestamp(self, new_future: datetime.datetime):
+        """
+        Updates the timestamp in the message.
+        """
         if self.message is None:
             return
         old_relative_time = str(self.timestamp)
@@ -431,7 +511,11 @@ class Dank:
         await self.replace_message(old_relative_time, new_relative_time)
 
     async def cancel(self, now: datetime.datetime):
+        """
+        Handles cancelling the dank.
+        """
         self.cancel_task()
+        # if checking, then we need to update things that are printed in the message
         if self.is_checking:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
@@ -440,12 +524,19 @@ class Dank:
         await self.channel.send("Dank cancelled.")
 
     async def advance(self, now: datetime.datetime):
+        """
+        Skips ahead to finish the dank now.
+        """
         self.cancel_task(reason="Advancing")
+        # if checking, then we need to update things that are printed in the message
         if self.is_checking:
             await self.update_timestamp(now)
         await self.finish()
 
     def get_dankers(self) -> Set[discord.Member]:
+        """
+        Gets available dankers, according to the largest satisfied bucket.
+        """
         bucket = set()
         # count down from the biggest bucket, so we can stop at the biggest that satisfies
         for i in reversed(BUCKET_RANGE):
@@ -461,6 +552,9 @@ class Dank:
 
 
 def get_int(s: str, default: Optional[int] = 0) -> int:
+    """
+    Tries to get an int from a string, if fails, returns default.
+    """
     try:
         val = int(s)
         return val
@@ -469,6 +563,9 @@ def get_int(s: str, default: Optional[int] = 0) -> int:
 
 
 def get_float(s: str, default: Optional[float] = 0.0) -> float:
+    """
+    Tries to get a float from a string, if fails, returns default.
+    """
     try:
         val = float(s)
         return val
@@ -478,10 +575,16 @@ def get_float(s: str, default: Optional[float] = 0.0) -> float:
 
 @dataclasses.dataclass(init=False)
 class DankOptions:
+    """
+    Represents arguments to the dank.
+    """
     future: Optional[datetime.datetime]
     bucket: int
 
     def __init__(self):
+        """
+        Initializes a blank/default options.
+        """
         self.future = None
         self.bucket = BUCKET_MIN
 
@@ -531,7 +634,13 @@ async def consume_args(
     created_at: datetime.datetime,
     options: DankOptions,
 ) -> Optional[DankOptions]:
+    """
+    Handles building options from command arguments by parsing args.
+
+    Returning None means we don't interact with the dank.
+    """
     control = args.pop(0)
+    # if there's a dank, try to control it
     if client.current_dank:
         if control == "cancel":
             await client.current_dank.cancel(created_at)
@@ -574,16 +683,25 @@ async def consume_args(
                             # TODO: probably want to detect if the time has past, so we can flip am or pm
                             word += "am" if local_now.hour < 12 else "pm"
                         just_time = word[:-2]
+                        # if it's just a single int representing the hour, normalize it into a full time
                         if get_int(just_time, None) is not None:
                             word = just_time + ":00" + word[-2:]
                         date_string += " " + word if date_string else word
                         settings = {"TIMEZONE": LOCAL_TIMEZONE, "TO_TIMEZONE": "UTC"}
+                        # if UTC time is in the next day, we need to act like we're getting a time in the past
+                        # because our local time zone is in the previous day, likewise with future
                         if (
                             client.now.day > local_now.day
                             or client.now.month > local_now.month
                             or client.now.year > local_now.year
                         ):
                             settings["PREFER_DATES_FROM"] = "past"
+                        elif (
+                            client.now.day < local_now.day
+                            or client.now.month < local_now.month
+                            or client.now.year < local_now.year
+                        ):
+                            settings["PREFER_DATES_FROM"] = "future"
                         attempt_date = dateparser.parse(
                             date_string, languages=["en"], settings=settings
                         )
@@ -616,7 +734,7 @@ async def consume_args(
                     # go through until we get a date
                     while True:
                         word = args[end]
-                        # if it's a shorthand quantity, ex. 1h, 5m
+                        # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
                         if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
                             i = 0
                             for i, c in enumerate(word):
@@ -625,13 +743,15 @@ async def consume_args(
                             args.insert(end + 1, word[i:])
                             word = word[:i]
                             last = len(args)
-                        # need to replace 1 with "a" or "an" depending on the next word if there is one
                         if last > end + 1:
                             noun = args[end + 1]
+                            # replace shorthand with longform unit, as required by the parser
                             longform_noun = HUMANIZE_SHORTHAND.get(noun)
                             if longform_noun is not None:
                                 noun = longform_noun
                                 args[end + 1] = noun
+                            # using a quantity must require you to use plural units.
+                            # if you don't for 1, you must use "a" or "an"
                             if word == "1":
                                 if not noun.endswith("s"):
                                     if noun in HUMANIZE_VOWEL_WORDS:
@@ -639,6 +759,7 @@ async def consume_args(
                                     else:
                                         word = "a"
                             else:
+                                # if it's a decimal quantity, convert it to the combination of units needed
                                 parsed_num = get_float(word, default=None)
                                 if parsed_num is not None:
                                     word = convert_humanize_decimal(parsed_num, noun)
@@ -680,35 +801,49 @@ TOKEN_WORD = "dank"
 
 
 def is_dank(content: str) -> bool:
+    """
+    Checks if the message represents a dank "command"
+    """
+    # if it is the word, passes
     word = content.split(maxsplit=1)[0]
     if word.startswith(TOKEN_WORD):
         return True
+    # has to start with d
     if not word.startswith(TOKEN_WORD[0]):
         return False
+    # fuzz it
     ratio = fuzz.ratio(word, TOKEN_WORD)
     return ratio > 70
 
 
 async def main():
+    """
+    Main function for running the client.
+    """
+
     global client
 
+    # limit the events we get to the ones required
     intents = Intents.none()
     intents.guild_messages = True
     intents.guilds = True
     intents.members = True
     intents.message_content = True
 
+    # limit the mentions to the ones required
     mentions = AllowedMentions.none()
     mentions.users = True
     mentions.roles = True
 
+    # create our client, limit messages to what we need to keep track of
     client = DankClient(
         max_messages=500,
         intents=intents,
         allowed_mentions=mentions,
     )
+
+    # start the client
     async with client as _client:
         await _client.start(os.environ["DANK_TOKEN"])
-
 
 asyncio.run(main())
