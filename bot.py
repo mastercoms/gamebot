@@ -8,16 +8,17 @@ import socket
 from typing import Dict, Set, List, Optional, Any, Callable
 
 import aiohttp
-import discord
-import datetime
-import dateparser
 import arrow
+import dateparser
+import datetime
+import discord
+import orjson
 
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
+from pytz import timezone
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
-from pytz import timezone
 
 if os.name == "nt":
     # handle Windows imports
@@ -98,7 +99,7 @@ class GameClient(discord.Client):
             restored_game.future = datetime.datetime.fromisoformat(save["future"])
             restored_game.timestamp = save["timestamp"]
             restored_game.is_checking = save["is_checking"]
-            restored_game.role = save["role"]
+            restored_game.game_name = save["game_name"]
             restored_game.message = await channel.fetch_message(save["message"])
             restored_game.has_initial = save["has_initial"]
             restored_game.was_scheduled = save["was_scheduled"]
@@ -193,8 +194,6 @@ def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None)
     return new
 
 
-LOCAL_TIMEZONE = "US/Eastern"
-LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
 TIMESTAMP_TIMEZONE = datetime.timezone.utc
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
 TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
@@ -224,17 +223,13 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 
 BUCKET_MIN: int = 2
-BUCKET_MAX: int = 5
+BUCKET_MAX: int = 2
 BUCKET_RANGE_MAX: int = BUCKET_MAX + 1
 BUCKET_RANGE = range(BUCKET_MIN, BUCKET_RANGE_MAX)
 
 DEFAULT_COUNTDOWN = 120.0
 MAX_CHECK_COUNTDOWN = 300.0
 DEFAULT_DELTA = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
-
-GAME_ROLES = {"dota": 261137719579770882}
-GAMES = list(GAME_ROLES.keys())
-DEFAULT_GAME = GAMES[0]
 
 
 def increment(val: int) -> int:
@@ -256,7 +251,7 @@ class Game:
     is_checking: bool
     author: discord.Member
     channel: discord.TextChannel
-    role: int
+    game_name: str
     message: Optional[discord.Message]
     task: Optional[asyncio.Task]
     has_initial: bool
@@ -271,7 +266,7 @@ class Game:
 
         self.author = author
         self.channel = channel
-        self.role = GAME_ROLES[DEFAULT_GAME]
+        self.game_name = DEFAULT_GAME
 
         self.task = None
 
@@ -294,7 +289,7 @@ class Game:
             "is_checking": self.is_checking,
             "author": self.author.id,
             "channel": self.channel.id,
-            "role": self.role,
+            "game_name": self.game_name,
             "message": self.message.id,
             "has_initial": self.has_initial,
             "was_scheduled": self.was_scheduled,
@@ -338,14 +333,18 @@ class Game:
         Starts/schedules the game check.
         """
         if self.base_mention is None:
-            self.base_mention = f"<@&{self.role}>" if mention is None else mention
+            self.base_mention = (
+                f"<@&{GAME_DATA[self.game_name]['role']}>"
+                if mention is None
+                else mention
+            )
         name = self.author.display_name
         relative_time = print_timestamp(self.timestamp, "R")
         if self.is_checking:
-            msg = f"{self.base_mention} {name} requested a {TOKEN_TITLE} Check. (expires {relative_time})"
+            msg = f"{self.base_mention} {name} requested a {KEYWORD_TITLE} Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, "t")
-            msg = f"{self.base_mention} {name} scheduled a {TOKEN_WORD} at {short_time} ({relative_time})."
+            msg = f"{self.base_mention} {name} scheduled a {KEYWORD} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
         else:
@@ -381,7 +380,10 @@ class Game:
         Sets a gamer to the specified buckets.
         """
         # out of bounds buckets
-        min_bucket = max(BUCKET_MIN, min(min_bucket, BUCKET_MAX))
+        min_bucket = max(
+            GAME_DATA[self.game_name].get("min", BUCKET_MIN),
+            min(min_bucket, GAME_DATA[self.game_name].get("max", BUCKET_MAX)),
+        )
 
         # remove them first if this is an update
         current_min_bucket = self.gamer_buckets.get(gamer)
@@ -401,12 +403,12 @@ class Game:
             size = len(self.gamer_buckets)
             size = f"**({size}/5)**"
             with_str = (
-                f" with {min_bucket} {TOKEN_WORD}{TOKEN_SUBJECT_SUFFIX}"
+                f" with {min_bucket} {KEYWORD}{KEYWORD_SUBJECT_SUFFIX}"
                 if min_bucket > BUCKET_MIN
                 else ""
             )
             if self.is_checking:
-                msg = f"{name} is ready to {TOKEN_WORD}{with_str}. {size}"
+                msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < DEFAULT_COUNTDOWN:
                     missing_countdown = datetime.timedelta(
@@ -416,7 +418,7 @@ class Game:
             else:
                 short_time = print_timestamp(self.timestamp, "t")
                 relative_time = print_timestamp(self.timestamp, "R")
-                msg = f"{name} can {TOKEN_WORD} at {short_time} ({relative_time}){with_str}. {size}"
+                msg = f"{name} can {KEYWORD} at {short_time} ({relative_time}){with_str}. {size}"
             await self.channel.send(msg)
         else:
             self.has_initial = True
@@ -435,7 +437,7 @@ class Game:
             self.group_buckets[bucket].remove(gamer)
 
         if notify:
-            await self.channel.send(f"You left the {TOKEN_WORD}.")
+            await self.channel.send(f"You left the {KEYWORD}.")
 
         self.save()
 
@@ -473,7 +475,7 @@ class Game:
             if self.is_checking:
                 # finish the game
                 await self.channel.send(
-                    f"{mention} {TOKEN_TITLE} Check complete. **{len(gamers)}/5** players ready to {TOKEN_WORD}."
+                    f"{mention} {KEYWORD_TITLE} Check complete. **{len(gamers)}/5** players ready to {KEYWORD}."
                 )
                 # we had a game
                 set_value("no_dankers_consecutive", 0)
@@ -489,10 +491,10 @@ class Game:
             no_gamers = update_value(increment, "no_dankers", 0)
             no_gamers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
             await self.channel.send(
-                f"No {TOKEN_WORD}{TOKEN_SUBJECT_SUFFIX} found for the {TOKEN_WORD}. This server has gone {no_gamers} {TOKEN_WORD}s without a {TOKEN_WORD}. ({no_gamers_consecutive} in a row)."
+                f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row)."
             )
             await self.channel.send(
-                "https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg"
+                EXTRA_FAILURE_MESSAGE
             )
         if self.is_checking:
             # make it past tense
@@ -528,7 +530,7 @@ class Game:
             await self.replace_message("expires", "cancelled")
         client.current_game = None
         client.backup_table.truncate()
-        await self.channel.send(f"{TOKEN_TITLE} cancelled.")
+        await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
         """
@@ -695,21 +697,24 @@ async def consume_args(
                         if get_int(just_time, None) is not None:
                             word = just_time + ":00" + word[-2:]
                         date_string += " " + word if date_string else word
-                        settings = {"TIMEZONE": LOCAL_TIMEZONE, "TO_TIMEZONE": "UTC"}
-                        # if UTC time is in the next day, we need to act like we're getting a time in the past
-                        # because our local time zone is in the previous day, likewise with future
-                        if (
-                            client.now.day > local_now.day
-                            or client.now.month > local_now.month
-                            or client.now.year > local_now.year
-                        ):
-                            settings["PREFER_DATES_FROM"] = "past"
-                        elif (
-                            client.now.day < local_now.day
-                            or client.now.month < local_now.month
-                            or client.now.year < local_now.year
-                        ):
-                            settings["PREFER_DATES_FROM"] = "future"
+                        if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
+                            settings = {"TIMEZONE": LOCAL_TIMEZONE, "TO_TIMEZONE": "UTC"}
+                            # if UTC time is in the next day, we need to act like we're getting a time in the past
+                            # because our local time zone is in the previous day, likewise with future
+                            if (
+                                client.now.day > local_now.day
+                                or client.now.month > local_now.month
+                                or client.now.year > local_now.year
+                            ):
+                                settings["PREFER_DATES_FROM"] = "past"
+                            elif (
+                                client.now.day < local_now.day
+                                or client.now.month < local_now.month
+                                or client.now.year < local_now.year
+                            ):
+                                settings["PREFER_DATES_FROM"] = "future"
+                        else:
+                            settings = None
                         attempt_date = dateparser.parse(
                             date_string, languages=["en"], settings=settings
                         )
@@ -805,9 +810,6 @@ async def consume_args(
 
 
 FUZZ_THRESHOLD = 70
-TOKEN_WORD = "dank"
-TOKEN_SUBJECT_SUFFIX = "rs" if TOKEN_WORD.endswith("e") else "ers"
-TOKEN_TITLE = TOKEN_WORD[0].upper() + TOKEN_WORD[1:]
 
 
 def is_game_command(content: str) -> bool:
@@ -816,13 +818,13 @@ def is_game_command(content: str) -> bool:
     """
     # if it is the word, passes
     word = content.split(maxsplit=1)[0]
-    if word.startswith(TOKEN_WORD):
+    if word.startswith(KEYWORD):
         return True
     # has to start with d
-    if not word.startswith(TOKEN_WORD[0]):
+    if not word.startswith(KEYWORD[0]):
         return False
     # fuzz it
-    ratio = fuzz.ratio(word, TOKEN_WORD)
+    ratio = fuzz.ratio(word, KEYWORD)
     return ratio > 70
 
 
@@ -860,5 +862,21 @@ async def main():
 if os.name == "nt":
     # On Windows, the selector event loop is required for aiodns and avoiding exceptions on exit
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+with open("settings.json", "rb") as f:
+    config = orjson.loads(f.read())
+
+    LOCAL_TIMEZONE = config["local_timezone"]
+    LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
+
+    GAME_DATA = config["games"]
+    GAMES = list(GAME_DATA.keys())
+    DEFAULT_GAME = GAMES[0]
+
+    KEYWORD = config["keyword"]
+    KEYWORD_SUBJECT_SUFFIX = "rs" if KEYWORD.endswith("e") else "ers"
+    KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
+
+    EXTRA_FAILURE_MESSAGE = config["failure_message"]
 
 asyncio.run(main())
