@@ -2,6 +2,11 @@
 
 quick discord bot for pinging people to play games
 
+## running
+
+1. `pipenv install`
+2. `GAME_BOT_TOKEN=token pipenv run python bot.py` 
+
 ## commands
 
 Just say `game` to schedule a game, and say `game` to join up for a scheduled one. Only supports one running at a time.
