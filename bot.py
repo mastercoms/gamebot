@@ -184,7 +184,7 @@ MAX_CHECK_COUNTDOWN = 300.0
 DEFAULT_DELTA = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
 
 GAME_ROLES = {
-    'dota': 261137719579770882
+    "dota": 261137719579770882
 }
 GAMES = list(GAME_ROLES.keys())
 DEFAULT_GAME = GAMES[0]
@@ -538,12 +538,12 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                             if period.startswith("p") or period.startswith("a"):
                                 word += period
                                 end += 1
+                        local_now = client.now.astimezone(LOCAL_TZINFO)
                         # use pm and am, not p or a
                         if word.endswith("p") or word.endswith("a"):
                             word += "m"
                         elif not word.endswith("pm") and not word.endswith("am"):
                             # if there's no period at all, just autodetect based on current
-                            local_now = client.now.astimezone(LOCAL_TZINFO)
                             # TODO: probably want to detect if the time has past, so we can flip am or pm
                             word += "am" if local_now.hour < 12 else "pm"
                         just_time = word[:-2]
@@ -551,9 +551,11 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                             word = just_time + ":00" + word[-2:]
                         date_string += " " + word if date_string else word
                         settings = {
-                            'TIMEZONE': LOCAL_TIMEZONE,
-                            'TO_TIMEZONE': 'UTC'
+                            "TIMEZONE": LOCAL_TIMEZONE,
+                            "TO_TIMEZONE": "UTC"
                         }
+                        if client.now.day > local_now.day or client.now.month > local_now.month or client.now.year > local_now.year:
+                            settings["PREFER_DATES_FROM"] = "past"
                         attempt_date = dateparser.parse(date_string, languages=["en"], settings=settings)
                         # go to next arg
                         end += 1
@@ -674,6 +676,6 @@ async def main():
         allowed_mentions=mentions,
     )
     async with client as _client:
-        await _client.start(os.environ['DANK_TOKEN'])
+        await _client.start(os.environ["DANK_TOKEN"])
 
 asyncio.run(main())
