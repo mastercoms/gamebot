@@ -88,7 +88,8 @@ class GameClient(discord.Client):
             save = save["v"]
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
-            restored_game = Game(channel, author)
+            game_name = save["game_name"]
+            restored_game = Game(channel, author, game_name)
             restored_game.group_buckets = {
                 int(k): {guild.get_member(m) for m in v}
                 for k, v in save["group_buckets"].items()
@@ -99,7 +100,6 @@ class GameClient(discord.Client):
             restored_game.future = datetime.datetime.fromisoformat(save["future"])
             restored_game.timestamp = save["timestamp"]
             restored_game.is_checking = save["is_checking"]
-            restored_game.game_name = save["game_name"]
             restored_game.message = await channel.fetch_message(save["message"])
             restored_game.has_initial = save["has_initial"]
             restored_game.was_scheduled = save["was_scheduled"]
@@ -153,7 +153,7 @@ class GameClient(discord.Client):
                     # if didn't get a date, default to delta
                     if not options.future:
                         options.future = self.now + DEFAULT_DELTA
-                    self.current_game = Game(message.channel, gamer)
+                    self.current_game = Game(message.channel, gamer, options.game)
                     await self.current_game.start(options.future)
 
                 # add to game
@@ -255,7 +255,7 @@ class Game:
     was_scheduled: Optional[bool]
     base_mention: Optional[str]
 
-    def __init__(self, channel: discord.TextChannel, author: discord.Member):
+    def __init__(self, channel: discord.TextChannel, author: discord.Member, game_name: str = None):
         """
         Creates a new Game, to be started with start().
         """
@@ -263,7 +263,7 @@ class Game:
 
         self.author = author
         self.channel = channel
-        self.game_name = DEFAULT_GAME
+        self.game_name = game_name if game_name else DEFAULT_GAME
 
         self.task = None
 
@@ -818,6 +818,7 @@ async def consume_args(
                 game = args.pop(0)
                 if game in GAMES:
                     options.game = game
+                    return options
 
     if args:
         # if buckets
@@ -889,14 +890,14 @@ with open("settings.json", "rb") as f:
     LOCAL_TIMEZONE = config.get("local_timezone", "US/Eastern")
     LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
 
-    GAME_DATA = config["games"]
-    GAMES = list(GAME_DATA.keys())
-    DEFAULT_GAME = GAMES[0]
-
     KEYWORD = config.get("keyword", "game")
     KEYWORD_SUBJECT_SUFFIX = "rs" if KEYWORD.endswith("e") else "ers"
     KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
 
     EXTRA_FAILURE_MESSAGE = config.get("failure_message", None)
+
+    GAME_DATA = config["games"]
+    GAMES = list(GAME_DATA.keys())
+    DEFAULT_GAME = GAMES[0]
 
 asyncio.run(main())
