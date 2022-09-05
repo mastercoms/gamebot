@@ -17,6 +17,7 @@ from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
+from pytz import timezone
 
 if os.name == "nt":
     import colorama
@@ -153,6 +154,7 @@ def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None)
 
 
 LOCAL_TIMEZONE = "US/Eastern"
+LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
 TIMESTAMP_TIMEZONE = datetime.timezone.utc
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
 TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
@@ -529,7 +531,25 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                     confirmed_date = None
                     # go through until we get a date
                     while True:
-                        date_string += " " + args[end] if date_string else args[end]
+                        word = args[end]
+                        # combine if space
+                        if last > end + 1:
+                            period = args[end + 1]
+                            if period.startswith("p") or period.startswith("a"):
+                                word += period
+                                end += 1
+                        # use pm and am, not p or a
+                        if word.endswith("p") or word.endswith("a"):
+                            word += "m"
+                        elif not word.endswith("pm") and not word.endswith("am"):
+                            # if there's no period at all, just autodetect based on current
+                            local_now = client.now.astimezone(LOCAL_TZINFO)
+                            # TODO: probably want to detect if the time has past, so we can flip am or pm
+                            word += "am" if local_now.hour < 12 else "pm"
+                        just_time = word[:-2]
+                        if get_int(just_time, None) is not None:
+                            word = just_time + ":00" + word[-2:]
+                        date_string += " " + word if date_string else word
                         settings = {
                             'TIMEZONE': LOCAL_TIMEZONE,
                             'TO_TIMEZONE': 'UTC'
