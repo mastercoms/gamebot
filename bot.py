@@ -34,6 +34,32 @@ else:
     uvloop.install()
 
 
+def create_task(coro, *, name=None):
+    task = asyncio.create_task(coro, name=name)
+    return TaskWrapper(task)
+
+
+class TaskWrapper:
+    def __init__(self, task):
+        self.task = task
+        task.add_done_callback(self.on_task_done)
+
+    def __getattr__(self, name):
+        return getattr(self.task, name)
+
+    def __await__(self):
+        self.task.remove_done_callback(self.on_task_done)
+        return self.task.__await__()
+
+    def on_task_done(self, fut: asyncio.Future):
+        if fut.cancelled() or not fut.done():
+            return
+        fut.result()
+
+    def __str__(self):
+        return f"TaskWrapper<task={self.task}>"
+
+
 class GameClient(discord.Client):
     """
     The Discord client for this bot.
@@ -250,20 +276,26 @@ class Game:
     channel: discord.TextChannel
     game_name: str
     message: Optional[discord.Message]
-    task: Optional[asyncio.Task]
+    task: Optional[TaskWrapper]
     has_initial: bool
     was_scheduled: Optional[bool]
     base_mention: Optional[str]
 
-    def __init__(self, channel: discord.TextChannel, author: discord.Member, game_name: str = None):
+    def __init__(
+        self,
+        channel: discord.TextChannel,
+        author: discord.Member,
+        game_name: str = None,
+    ):
         """
         Creates a new Game, to be started with start().
         """
+        self.game_name = game_name if game_name else DEFAULT_GAME
+
         self.reset()
 
         self.author = author
         self.channel = channel
-        self.game_name = game_name if game_name else DEFAULT_GAME
 
         self.task = None
 
@@ -451,7 +483,7 @@ class Game:
         """
         Directly starts the asyncio countdown task.
         """
-        self.task = asyncio.create_task(self.countdown(), name="Countdown")
+        self.task = create_task(self.countdown(), name="Countdown")
 
     async def refresh(self, future: datetime.datetime):
         """
@@ -489,9 +521,7 @@ class Game:
                 # start the game up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
                 self.reset()
-                asyncio.create_task(
-                    self.start(client.now + DEFAULT_DELTA, mention=mention)
-                )
+                create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
             no_gamers = update_value(increment, "no_gamers", 0)
@@ -600,7 +630,7 @@ class GameOptions:
 
     future: Optional[datetime.datetime]
     bucket: int
-    game: str
+    game: Optional[str]
 
     def __init__(self):
         """
@@ -899,5 +929,8 @@ with open("settings.json", "rb") as f:
     GAME_DATA = config["games"]
     GAMES = list(GAME_DATA.keys())
     DEFAULT_GAME = GAMES[0]
+
+
+discord.utils.setup_logging()
 
 asyncio.run(main())
