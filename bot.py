@@ -21,9 +21,11 @@ from pytz import timezone
 
 if os.name == "nt":
     import colorama
+
     colorama.init()
 else:
     import uvloop
+
     uvloop.install()
 
 
@@ -39,7 +41,9 @@ class DankClient(discord.Client):
 
         self.lock: Optional[asyncio.Lock] = None
 
-        self.db = TinyDB(pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage)
+        self.db = TinyDB(
+            pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
+        )
         self.backup_table = self.db.table("backup")
 
     async def setup_hook(self) -> None:
@@ -67,9 +71,13 @@ class DankClient(discord.Client):
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
             restored_dank = Dank(channel, author)
-            restored_dank.group_buckets = {int(k): {guild.get_member(m) for m in v} for k, v in
-                                           save["group_buckets"].items()}
-            restored_dank.danker_buckets = {guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()}
+            restored_dank.group_buckets = {
+                int(k): {guild.get_member(m) for m in v}
+                for k, v in save["group_buckets"].items()
+            }
+            restored_dank.danker_buckets = {
+                guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()
+            }
             restored_dank.future = datetime.datetime.fromisoformat(save["future"])
             restored_dank.timestamp = save["timestamp"]
             restored_dank.is_checking = save["is_checking"]
@@ -107,7 +115,9 @@ class DankClient(discord.Client):
 
                 # consume all args
                 while args:
-                    options = await consume_args(args, danker, message.created_at, options)
+                    options = await consume_args(
+                        args, danker, message.created_at, options
+                    )
                     # if we cleared options, then we stop here
                     if not options:
                         return
@@ -183,9 +193,7 @@ DEFAULT_COUNTDOWN = 120.0
 MAX_CHECK_COUNTDOWN = 300.0
 DEFAULT_DELTA = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
 
-GAME_ROLES = {
-    "dota": 261137719579770882
-}
+GAME_ROLES = {"dota": 261137719579770882}
 GAMES = list(GAME_ROLES.keys())
 DEFAULT_GAME = GAMES[0]
 
@@ -223,7 +231,9 @@ class Dank:
 
     def save(self):
         data = {
-            "group_buckets": {str(k): [m.id for m in v] for k, v in self.group_buckets.items()},
+            "group_buckets": {
+                str(k): [m.id for m in v] for k, v in self.group_buckets.items()
+            },
             "danker_buckets": {str(k.id): v for k, v in self.danker_buckets.items()},
             "future": self.future.isoformat(),
             "timestamp": self.timestamp,
@@ -234,7 +244,7 @@ class Dank:
             "message": self.message.id,
             "has_initial": self.has_initial,
             "was_scheduled": self.was_scheduled,
-            "base_mention": self.base_mention
+            "base_mention": self.base_mention,
         }
         client.backup_table.upsert({"k": "saved", "v": data}, Store.k == "saved")
 
@@ -273,11 +283,11 @@ class Dank:
         if self.base_mention is None:
             self.base_mention = f"<@&{self.role}>" if mention is None else mention
         name = self.author.display_name
-        relative_time = print_timestamp(self.timestamp, 'R')
+        relative_time = print_timestamp(self.timestamp, "R")
         if self.is_checking:
             msg = f"{self.base_mention} {name} requested a Dank Check. (expires {relative_time})"
         else:
-            short_time = print_timestamp(self.timestamp, 't')
+            short_time = print_timestamp(self.timestamp, "t")
             msg = f"{self.base_mention} {name} scheduled a dank at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
@@ -323,11 +333,13 @@ class Dank:
                 msg = f"{name} is ready to dank{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < DEFAULT_COUNTDOWN:
-                    missing_countdown = datetime.timedelta(seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds())
+                    missing_countdown = datetime.timedelta(
+                        seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds()
+                    )
                     await self.refresh(self.future + missing_countdown)
             else:
-                short_time = print_timestamp(self.timestamp, 't')
-                relative_time = print_timestamp(self.timestamp, 'R')
+                short_time = print_timestamp(self.timestamp, "t")
+                relative_time = print_timestamp(self.timestamp, "R")
                 msg = f"{name} can dank at {short_time} ({relative_time}){with_str}. {size}"
             await self.channel.send(msg)
         else:
@@ -353,7 +365,7 @@ class Dank:
 
     async def refresh(self, future: datetime.datetime):
         """
-         Refreshes the dank with a new countdown.
+        Refreshes the dank with a new countdown.
         """
         self.cancel_task(reason="Refreshing")
         await self.start(future)
@@ -377,20 +389,30 @@ class Dank:
             mention = " ".join([danker.mention for danker in dankers])
             if self.is_checking:
                 # finish the dank
-                await self.channel.send(f"{mention} Dank Check complete. **{len(dankers)}/5** players ready to dank.")
+                await self.channel.send(
+                    f"{mention} Dank Check complete. **{len(dankers)}/5** players ready to dank."
+                )
                 # we had a dank
                 set_value("no_dankers_consecutive", 0)
             else:
                 # start the dank up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
                 self.reset()
-                asyncio.create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
+                asyncio.create_task(
+                    self.start(client.now + DEFAULT_DELTA, mention=mention)
+                )
                 return
         else:
             no_dankers = update_value(increment, "no_dankers", 0)
-            no_dankers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
-            await self.channel.send(f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row).")
-            await self.channel.send("https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg")
+            no_dankers_consecutive = update_value(
+                increment, "no_dankers_consecutive", 0
+            )
+            await self.channel.send(
+                f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row)."
+            )
+            await self.channel.send(
+                "https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg"
+            )
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
@@ -473,7 +495,7 @@ HUMANIZE_MAPPING = {
     "weeks": (7.0, "days"),
     "days": (24.0, "hours"),
     "hours": (60.0, "minutes"),
-    "minutes": (60.0, "seconds")
+    "minutes": (60.0, "seconds"),
 }
 HUMANIZE_SHORTHAND = {
     "mins": "minutes",
@@ -483,7 +505,7 @@ HUMANIZE_SHORTHAND = {
     "d": "days",
     "secs": "seconds",
     "sec": "seconds",
-    "s": "seconds"
+    "s": "seconds",
 }
 NUMERIC = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "."}
 
@@ -503,7 +525,12 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
     return f"{base}, {convert_humanize_decimal(lesser_quantity, lesser_unit)}"
 
 
-async def consume_args(args: List[str], danker: discord.Member, created_at: datetime.datetime, options: DankOptions) -> Optional[DankOptions]:
+async def consume_args(
+    args: List[str],
+    danker: discord.Member,
+    created_at: datetime.datetime,
+    options: DankOptions,
+) -> Optional[DankOptions]:
     control = args.pop(0)
     if client.current_dank:
         if control == "cancel":
@@ -550,13 +577,16 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                         if get_int(just_time, None) is not None:
                             word = just_time + ":00" + word[-2:]
                         date_string += " " + word if date_string else word
-                        settings = {
-                            "TIMEZONE": LOCAL_TIMEZONE,
-                            "TO_TIMEZONE": "UTC"
-                        }
-                        if client.now.day > local_now.day or client.now.month > local_now.month or client.now.year > local_now.year:
+                        settings = {"TIMEZONE": LOCAL_TIMEZONE, "TO_TIMEZONE": "UTC"}
+                        if (
+                            client.now.day > local_now.day
+                            or client.now.month > local_now.month
+                            or client.now.year > local_now.year
+                        ):
                             settings["PREFER_DATES_FROM"] = "past"
-                        attempt_date = dateparser.parse(date_string, languages=["en"], settings=settings)
+                        attempt_date = dateparser.parse(
+                            date_string, languages=["en"], settings=settings
+                        )
                         # go to next arg
                         end += 1
                         # we made a new date
@@ -571,7 +601,9 @@ async def consume_args(args: List[str], danker: discord.Member, created_at: date
                     del args[:new_start]
                     if confirmed_date:
                         if confirmed_date.tzinfo is None:
-                            confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
+                            confirmed_date = confirmed_date.replace(
+                                tzinfo=TIMESTAMP_TIMEZONE
+                            )
                         options.future = confirmed_date
                     return options
                 if control == "in":
@@ -677,5 +709,6 @@ async def main():
     )
     async with client as _client:
         await _client.start(os.environ["DANK_TOKEN"])
+
 
 asyncio.run(main())
