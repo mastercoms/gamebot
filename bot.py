@@ -20,10 +20,14 @@ from thefuzz import fuzz
 from pytz import timezone
 
 if os.name == "nt":
+    # handle Windows imports
+    # for colored terminal
     import colorama
 
     colorama.init()
 else:
+    # handle POSIX imports
+    # for uvloop
     import uvloop
 
     uvloop.install()
@@ -33,6 +37,7 @@ class DankClient(discord.Client):
     """
     The Discord client for this bot.
     """
+
     def __init__(self, *args, **kwargs):
         """
         Creates a new Discord client.
@@ -214,7 +219,7 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
     """
     Gets a datetime from UNIX timestamp.
     """
-    delta = datetime.timedelta(milliseconds=timestamp)
+    delta = datetime.timedelta(seconds=timestamp)
     return EPOCH + delta
 
 
@@ -337,10 +342,10 @@ class Dank:
         name = self.author.display_name
         relative_time = print_timestamp(self.timestamp, "R")
         if self.is_checking:
-            msg = f"{self.base_mention} {name} requested a Dank Check. (expires {relative_time})"
+            msg = f"{self.base_mention} {name} requested a {TOKEN_TITLE} Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, "t")
-            msg = f"{self.base_mention} {name} scheduled a dank at {short_time} ({relative_time})."
+            msg = f"{self.base_mention} {name} scheduled a {TOKEN_WORD} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
         else:
@@ -395,9 +400,11 @@ class Dank:
             name = danker.display_name
             size = len(self.danker_buckets)
             size = f"**({size}/5)**"
-            with_str = f" with {min_bucket} dankers" if min_bucket > BUCKET_MIN else ""
+            with_str = (
+                f" with {min_bucket} {TOKEN_WORD}ers" if min_bucket > BUCKET_MIN else ""
+            )
             if self.is_checking:
-                msg = f"{name} is ready to dank{with_str}. {size}"
+                msg = f"{name} is ready to {TOKEN_WORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < DEFAULT_COUNTDOWN:
                     missing_countdown = datetime.timedelta(
@@ -407,7 +414,7 @@ class Dank:
             else:
                 short_time = print_timestamp(self.timestamp, "t")
                 relative_time = print_timestamp(self.timestamp, "R")
-                msg = f"{name} can dank at {short_time} ({relative_time}){with_str}. {size}"
+                msg = f"{name} can {TOKEN_WORD} at {short_time} ({relative_time}){with_str}. {size}"
             await self.channel.send(msg)
         else:
             self.has_initial = True
@@ -426,7 +433,7 @@ class Dank:
             self.group_buckets[bucket].remove(danker)
 
         if notify:
-            await self.channel.send("You left the dank.")
+            await self.channel.send(f"You left the {TOKEN_WORD}.")
 
         self.save()
 
@@ -464,7 +471,7 @@ class Dank:
             if self.is_checking:
                 # finish the dank
                 await self.channel.send(
-                    f"{mention} Dank Check complete. **{len(dankers)}/5** players ready to dank."
+                    f"{mention} {TOKEN_TITLE} Check complete. **{len(dankers)}/5** players ready to {TOKEN_WORD}."
                 )
                 # we had a dank
                 set_value("no_dankers_consecutive", 0)
@@ -482,7 +489,7 @@ class Dank:
                 increment, "no_dankers_consecutive", 0
             )
             await self.channel.send(
-                f"No dankers found for the dank. This server has gone {no_dankers} danks without a dank. ({no_dankers_consecutive} in a row)."
+                f"No {TOKEN_WORD}ers found for the {TOKEN_WORD}. This server has gone {no_dankers} {TOKEN_WORD}s without a {TOKEN_WORD}. ({no_dankers_consecutive} in a row)."
             )
             await self.channel.send(
                 "https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg"
@@ -521,7 +528,7 @@ class Dank:
             await self.replace_message("expires", "cancelled")
         client.current_dank = None
         client.backup_table.truncate()
-        await self.channel.send("Dank cancelled.")
+        await self.channel.send(f"{TOKEN_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
         """
@@ -578,6 +585,7 @@ class DankOptions:
     """
     Represents arguments to the dank.
     """
+
     future: Optional[datetime.datetime]
     bucket: int
 
@@ -798,6 +806,7 @@ async def consume_args(
 
 FUZZ_THRESHOLD = 70
 TOKEN_WORD = "dank"
+TOKEN_TITLE = TOKEN_WORD[0].upper() + TOKEN_WORD[1:]
 
 
 def is_dank(content: str) -> bool:
@@ -845,5 +854,10 @@ async def main():
     # start the client
     async with client as _client:
         await _client.start(os.environ["DANK_TOKEN"])
+
+
+if os.name == "nt":
+    # On Windows, the selector event loop is required for aiodns and avoiding exceptions on exit
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 asyncio.run(main())
