@@ -223,9 +223,6 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 
 BUCKET_MIN: int = 2
-BUCKET_MAX: int = 2
-BUCKET_RANGE_MAX: int = BUCKET_MAX + 1
-BUCKET_RANGE = range(BUCKET_MIN, BUCKET_RANGE_MAX)
 
 DEFAULT_COUNTDOWN = 120.0
 MAX_CHECK_COUNTDOWN = 300.0
@@ -302,7 +299,11 @@ class Game:
         Resets the game to require new confirmation, for starting a Game Check.
         """
         self.group_buckets = dict()
-        for bucket in BUCKET_RANGE:
+
+        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
+        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        bucket_range_max = game_max + 1
+        for bucket in range(game_min, bucket_range_max):
             self.group_buckets[bucket] = set()
         self.gamer_buckets = dict()
         self.message = None
@@ -379,11 +380,12 @@ class Game:
         """
         Sets a gamer to the specified buckets.
         """
+        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
+        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        bucket_range_max = game_max + 1
+
         # out of bounds buckets
-        min_bucket = max(
-            GAME_DATA[self.game_name].get("min", BUCKET_MIN),
-            min(min_bucket, GAME_DATA[self.game_name].get("max", BUCKET_MAX)),
-        )
+        min_bucket = max(game_min, min(min_bucket, game_max))
 
         # remove them first if this is an update
         current_min_bucket = self.gamer_buckets.get(gamer)
@@ -395,7 +397,7 @@ class Game:
 
         # add them from that bucket and beyond
         self.gamer_buckets[gamer] = min_bucket
-        for bucket in range(min_bucket, BUCKET_RANGE_MAX):
+        for bucket in range(min_bucket, bucket_range_max):
             self.group_buckets[bucket].add(gamer)
 
         if self.has_initial:
@@ -432,8 +434,12 @@ class Game:
         # pop off the gamer lookup
         min_bucket = self.gamer_buckets.pop(gamer)
 
+        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
+        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        bucket_range_max = game_max + 1
+
         # remove from all groups
-        for bucket in range(min_bucket, BUCKET_RANGE_MAX):
+        for bucket in range(min_bucket, bucket_range_max):
             self.group_buckets[bucket].remove(gamer)
 
         if notify:
@@ -478,7 +484,7 @@ class Game:
                     f"{mention} {KEYWORD_TITLE} Check complete. **{len(gamers)}/5** players ready to {KEYWORD}."
                 )
                 # we had a game
-                set_value("no_dankers_consecutive", 0)
+                set_value("no_gamers_consecutive", 0)
             else:
                 # start the game up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
@@ -488,14 +494,13 @@ class Game:
                 )
                 return
         else:
-            no_gamers = update_value(increment, "no_dankers", 0)
-            no_gamers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
+            no_gamers = update_value(increment, "no_gamers", 0)
+            no_gamers_consecutive = update_value(increment, "no_gamers_consecutive", 0)
             await self.channel.send(
                 f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row)."
             )
-            await self.channel.send(
-                EXTRA_FAILURE_MESSAGE
-            )
+            if EXTRA_FAILURE_MESSAGE:
+                await self.channel.send(EXTRA_FAILURE_MESSAGE)
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
@@ -547,8 +552,13 @@ class Game:
         Gets available gamers, according to the largest satisfied bucket.
         """
         bucket = set()
+
+        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
+        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        bucket_range_max = game_max + 1
+
         # count down from the biggest bucket, so we can stop at the biggest that satisfies
-        for i in reversed(BUCKET_RANGE):
+        for i in reversed(range(game_min, bucket_range_max)):
             # get the bucket from index
             candidate_bucket = self.group_buckets[i]
             # get the bucket's size
@@ -590,12 +600,14 @@ class GameOptions:
 
     future: Optional[datetime.datetime]
     bucket: int
+    game: str
 
     def __init__(self):
         """
         Initializes a blank/default options.
         """
         self.future = None
+        self.game = None
         self.bucket = BUCKET_MIN
 
 
@@ -698,7 +710,10 @@ async def consume_args(
                             word = just_time + ":00" + word[-2:]
                         date_string += " " + word if date_string else word
                         if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
-                            settings = {"TIMEZONE": LOCAL_TIMEZONE, "TO_TIMEZONE": "UTC"}
+                            settings = {
+                                "TIMEZONE": LOCAL_TIMEZONE,
+                                "TO_TIMEZONE": "UTC",
+                            }
                             # if UTC time is in the next day, we need to act like we're getting a time in the past
                             # because our local time zone is in the previous day, likewise with future
                             if (
@@ -798,6 +813,11 @@ async def consume_args(
                     del args[:new_start]
                     options.future = confirmed_date
                     return options
+        else:
+            if control == "for":
+                game = args.pop(0)
+                if game in GAMES:
+                    options.game = game
 
     if args:
         # if buckets
@@ -820,7 +840,7 @@ def is_game_command(content: str) -> bool:
     word = content.split(maxsplit=1)[0]
     if word.startswith(KEYWORD):
         return True
-    # has to start with d
+    # has to start with the letter
     if not word.startswith(KEYWORD[0]):
         return False
     # fuzz it
@@ -866,17 +886,17 @@ if os.name == "nt":
 with open("settings.json", "rb") as f:
     config = orjson.loads(f.read())
 
-    LOCAL_TIMEZONE = config["local_timezone"]
+    LOCAL_TIMEZONE = config.get("local_timezone", "US/Eastern")
     LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
 
     GAME_DATA = config["games"]
     GAMES = list(GAME_DATA.keys())
     DEFAULT_GAME = GAMES[0]
 
-    KEYWORD = config["keyword"]
+    KEYWORD = config.get("keyword", "game")
     KEYWORD_SUBJECT_SUFFIX = "rs" if KEYWORD.endswith("e") else "ers"
     KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
 
-    EXTRA_FAILURE_MESSAGE = config["failure_message"]
+    EXTRA_FAILURE_MESSAGE = config.get("failure_message", None)
 
 asyncio.run(main())
