@@ -33,7 +33,7 @@ else:
     uvloop.install()
 
 
-class DankClient(discord.Client):
+class GameClient(discord.Client):
     """
     The Discord client for this bot.
     """
@@ -47,7 +47,7 @@ class DankClient(discord.Client):
         self._resolver: Optional[aiohttp.AsyncResolver] = None
         self._connector: Optional[aiohttp.TCPConnector] = None
 
-        self.current_dank: Optional[Dank] = None
+        self.current_game: Optional[Game] = None
         self.now: Optional[datetime.datetime] = None
 
         self.lock: Optional[asyncio.Lock] = None
@@ -75,7 +75,7 @@ class DankClient(discord.Client):
 
     async def on_ready(self):
         """
-        Resumes a saved dank.
+        Resumes a saved game.
         """
         guild = None
         for guild in self.guilds:
@@ -87,30 +87,30 @@ class DankClient(discord.Client):
             save = save["v"]
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
-            restored_dank = Dank(channel, author)
-            restored_dank.group_buckets = {
+            restored_game = Game(channel, author)
+            restored_game.group_buckets = {
                 int(k): {guild.get_member(m) for m in v}
                 for k, v in save["group_buckets"].items()
             }
-            restored_dank.danker_buckets = {
-                guild.get_member(int(k)): v for k, v in save["danker_buckets"].items()
+            restored_game.gamer_buckets = {
+                guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
             }
-            restored_dank.future = datetime.datetime.fromisoformat(save["future"])
-            restored_dank.timestamp = save["timestamp"]
-            restored_dank.is_checking = save["is_checking"]
-            restored_dank.role = save["role"]
-            restored_dank.message = await channel.fetch_message(save["message"])
-            restored_dank.has_initial = save["has_initial"]
-            restored_dank.was_scheduled = save["was_scheduled"]
-            restored_dank.base_mention = save["base_mention"]
-            self.current_dank = restored_dank
-            self.current_dank.start_countdown()
+            restored_game.future = datetime.datetime.fromisoformat(save["future"])
+            restored_game.timestamp = save["timestamp"]
+            restored_game.is_checking = save["is_checking"]
+            restored_game.role = save["role"]
+            restored_game.message = await channel.fetch_message(save["message"])
+            restored_game.has_initial = save["has_initial"]
+            restored_game.was_scheduled = save["was_scheduled"]
+            restored_game.base_mention = save["base_mention"]
+            self.current_game = restored_game
+            self.current_game.start_countdown()
             break
         self.backup_table.truncate()
 
     async def on_message(self, message):
         """
-        Handles new dank messages.
+        Handles new game messages.
         """
         # not a bot
         if message.author.bot:
@@ -123,27 +123,27 @@ class DankClient(discord.Client):
         # normalize
         message.content = message.content.lower()
 
-        if is_dank(message.content):
+        if is_game_command(message.content):
             async with self.lock:
                 # set our global now to when the message was made
                 self.now = message.created_at
 
                 # set up our arg parser
                 args = message.content.split()[1:]
-                danker = message.author
-                options = DankOptions()
+                gamer = message.author
+                options = GameOptions()
 
                 # consume all args
                 while args:
                     options = await consume_args(
-                        args, danker, message.created_at, options
+                        args, gamer, message.created_at, options
                     )
                     # if we cleared options, then we stop here
                     if not options:
                         return
 
-                # are we going to start a dank?
-                if not self.current_dank:
+                # are we going to start a game?
+                if not self.current_game:
                     # check if it's sufficiently in the future
                     if options.future:
                         delta = options.future - self.now
@@ -152,14 +152,14 @@ class DankClient(discord.Client):
                     # if didn't get a date, default to delta
                     if not options.future:
                         options.future = self.now + DEFAULT_DELTA
-                    self.current_dank = Dank(message.channel, danker)
-                    await self.current_dank.start(options.future)
+                    self.current_game = Game(message.channel, gamer)
+                    await self.current_game.start(options.future)
 
-                # add to dank
-                await self.current_dank.add_danker(message.author, options.bucket)
+                # add to game
+                await self.current_game.add_gamer(message.author, options.bucket)
 
 
-client: Optional[DankClient] = None
+client: Optional[GameClient] = None
 
 Store = Query()
 
@@ -244,13 +244,13 @@ def increment(val: int) -> int:
     return val + 1
 
 
-class Dank:
+class Game:
     """
-    Represents a pending/active Dank.
+    Represents a pending/active Game.
     """
 
     group_buckets: Dict[int, Set[discord.Member]]
-    danker_buckets: Dict[discord.Member, int]
+    gamer_buckets: Dict[discord.Member, int]
     future: datetime.datetime
     timestamp: int
     is_checking: bool
@@ -265,7 +265,7 @@ class Dank:
 
     def __init__(self, channel: discord.TextChannel, author: discord.Member):
         """
-        Creates a new Dank, to be started with start().
+        Creates a new Game, to be started with start().
         """
         self.reset()
 
@@ -280,7 +280,7 @@ class Dank:
 
     def save(self):
         """
-        Saves the Dank to disk, so that it may be resumed in case of a crash.
+        Saves the Game to disk, so that it may be resumed in case of a crash/update/restart.
 
         Must be called any time any of the class properties change.
         """
@@ -288,7 +288,7 @@ class Dank:
             "group_buckets": {
                 str(k): [m.id for m in v] for k, v in self.group_buckets.items()
             },
-            "danker_buckets": {str(k.id): v for k, v in self.danker_buckets.items()},
+            "gamer_buckets": {str(k.id): v for k, v in self.gamer_buckets.items()},
             "future": self.future.isoformat(),
             "timestamp": self.timestamp,
             "is_checking": self.is_checking,
@@ -304,18 +304,18 @@ class Dank:
 
     def reset(self):
         """
-        Resets the dank to require new confirmation, for starting a Dank Check.
+        Resets the game to require new confirmation, for starting a Game Check.
         """
         self.group_buckets = dict()
         for bucket in BUCKET_RANGE:
             self.group_buckets[bucket] = set()
-        self.danker_buckets = dict()
+        self.gamer_buckets = dict()
         self.message = None
         self.base_mention = None
 
     async def start(self, future: datetime.datetime, mention: str = None):
         """
-        Starts the dank.
+        Starts the game.
         """
         self.update_future(future)
         await self.initialize(mention=mention)
@@ -323,7 +323,7 @@ class Dank:
 
     def update_future(self, future: datetime.datetime):
         """
-        Sets the time the dank finishes.
+        Sets the time the game finishes.
         """
         self.future = future
         self.timestamp = generate_timestamp(future)
@@ -335,7 +335,7 @@ class Dank:
 
     async def initialize(self, mention: str = None):
         """
-        Starts/schedules the dank check.
+        Starts/schedules the game check.
         """
         if self.base_mention is None:
             self.base_mention = f"<@&{self.role}>" if mention is None else mention
@@ -354,13 +354,13 @@ class Dank:
 
     def get_delta(self) -> datetime.timedelta:
         """
-        Gets the timedelta until the dank finishes.
+        Gets the timedelta until the game finishes.
         """
         return self.future - client.now
 
     def get_delta_seconds(self) -> float:
         """
-        Gets the number of seconds left until the dank finishes.
+        Gets the number of seconds left until the game finishes.
         """
         return self.get_delta().total_seconds()
 
@@ -376,32 +376,34 @@ class Dank:
         """
         await self.update_message(self.message.content.replace(old, new))
 
-    async def add_danker(self, danker: discord.Member, min_bucket: int):
+    async def add_gamer(self, gamer: discord.Member, min_bucket: int):
         """
-        Sets a danker to the specified buckets.
+        Sets a gamer to the specified buckets.
         """
         # out of bounds buckets
         min_bucket = max(BUCKET_MIN, min(min_bucket, BUCKET_MAX))
 
         # remove them first if this is an update
-        current_min_bucket = self.danker_buckets.get(danker)
+        current_min_bucket = self.gamer_buckets.get(gamer)
         if current_min_bucket:
             if current_min_bucket != min_bucket:
-                await self.remove_danker(danker, notify=False)
+                await self.remove_gamer(gamer, notify=False)
             else:
                 return
 
         # add them from that bucket and beyond
-        self.danker_buckets[danker] = min_bucket
+        self.gamer_buckets[gamer] = min_bucket
         for bucket in range(min_bucket, BUCKET_RANGE_MAX):
-            self.group_buckets[bucket].add(danker)
+            self.group_buckets[bucket].add(gamer)
 
         if self.has_initial:
-            name = danker.display_name
-            size = len(self.danker_buckets)
+            name = gamer.display_name
+            size = len(self.gamer_buckets)
             size = f"**({size}/5)**"
             with_str = (
-                f" with {min_bucket} {TOKEN_WORD}ers" if min_bucket > BUCKET_MIN else ""
+                f" with {min_bucket} {TOKEN_WORD}{TOKEN_SUBJECT_SUFFIX}"
+                if min_bucket > BUCKET_MIN
+                else ""
             )
             if self.is_checking:
                 msg = f"{name} is ready to {TOKEN_WORD}{with_str}. {size}"
@@ -421,16 +423,16 @@ class Dank:
 
         self.save()
 
-    async def remove_danker(self, danker: discord.Member, notify: bool = True):
+    async def remove_gamer(self, gamer: discord.Member, notify: bool = True):
         """
-        Removes a danker from all buckets.
+        Removes a gamer from all buckets.
         """
-        # pop off the danker lookup
-        min_bucket = self.danker_buckets.pop(danker)
+        # pop off the gamer lookup
+        min_bucket = self.gamer_buckets.pop(gamer)
 
         # remove from all groups
         for bucket in range(min_bucket, BUCKET_RANGE_MAX):
-            self.group_buckets[bucket].remove(danker)
+            self.group_buckets[bucket].remove(gamer)
 
         if notify:
             await self.channel.send(f"You left the {TOKEN_WORD}.")
@@ -445,14 +447,14 @@ class Dank:
 
     async def refresh(self, future: datetime.datetime):
         """
-        Refreshes the dank with a new countdown.
+        Refreshes the game with a new countdown.
         """
         self.cancel_task(reason="Refreshing")
         await self.start(future)
 
     async def countdown(self):
         """
-        Sleeps for the countdown time, and then finishes the dank.
+        Sleeps for the countdown time, and then finishes the game.
         """
         delta = self.get_delta_seconds()
         # if our delta is less than 16 milliseconds, then we don't expect scheduling accuracy and thus don't sleep
@@ -462,21 +464,21 @@ class Dank:
 
     async def finish(self):
         """
-        Either finishes the dank check, or starts one if it is scheduled.
+        Either finishes the game check, or starts one if it is scheduled.
         """
-        dankers = self.get_dankers()
-        if len(dankers) > 1:
+        gamers = self.get_gamers()
+        if len(gamers) > 1:
             # print out the message
-            mention = " ".join([danker.mention for danker in dankers])
+            mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
-                # finish the dank
+                # finish the game
                 await self.channel.send(
-                    f"{mention} {TOKEN_TITLE} Check complete. **{len(dankers)}/5** players ready to {TOKEN_WORD}."
+                    f"{mention} {TOKEN_TITLE} Check complete. **{len(gamers)}/5** players ready to {TOKEN_WORD}."
                 )
-                # we had a dank
+                # we had a game
                 set_value("no_dankers_consecutive", 0)
             else:
-                # start the dank up again
+                # start the game up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
                 self.reset()
                 asyncio.create_task(
@@ -484,12 +486,10 @@ class Dank:
                 )
                 return
         else:
-            no_dankers = update_value(increment, "no_dankers", 0)
-            no_dankers_consecutive = update_value(
-                increment, "no_dankers_consecutive", 0
-            )
+            no_gamers = update_value(increment, "no_dankers", 0)
+            no_gamers_consecutive = update_value(increment, "no_dankers_consecutive", 0)
             await self.channel.send(
-                f"No {TOKEN_WORD}ers found for the {TOKEN_WORD}. This server has gone {no_dankers} {TOKEN_WORD}s without a {TOKEN_WORD}. ({no_dankers_consecutive} in a row)."
+                f"No {TOKEN_WORD}{TOKEN_SUBJECT_SUFFIX} found for the {TOKEN_WORD}. This server has gone {no_gamers} {TOKEN_WORD}s without a {TOKEN_WORD}. ({no_gamers_consecutive} in a row)."
             )
             await self.channel.send(
                 "https://cdn.discordapp.com/attachments/195236615310934016/952745307509227592/cb3.jpg"
@@ -497,7 +497,7 @@ class Dank:
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
-        client.current_dank = None
+        client.current_game = None
         client.backup_table.truncate()
 
     def cancel_task(self, reason: str = "Cancelled"):
@@ -519,20 +519,20 @@ class Dank:
 
     async def cancel(self, now: datetime.datetime):
         """
-        Handles cancelling the dank.
+        Handles cancelling the game.
         """
         self.cancel_task()
         # if checking, then we need to update things that are printed in the message
         if self.is_checking:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
-        client.current_dank = None
+        client.current_game = None
         client.backup_table.truncate()
         await self.channel.send(f"{TOKEN_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
         """
-        Skips ahead to finish the dank now.
+        Skips ahead to finish the game now.
         """
         self.cancel_task(reason="Advancing")
         # if checking, then we need to update things that are printed in the message
@@ -540,9 +540,9 @@ class Dank:
             await self.update_timestamp(now)
         await self.finish()
 
-    def get_dankers(self) -> Set[discord.Member]:
+    def get_gamers(self) -> Set[discord.Member]:
         """
-        Gets available dankers, according to the largest satisfied bucket.
+        Gets available gamers, according to the largest satisfied bucket.
         """
         bucket = set()
         # count down from the biggest bucket, so we can stop at the biggest that satisfies
@@ -551,7 +551,7 @@ class Dank:
             candidate_bucket = self.group_buckets[i]
             # get the bucket's size
             size = len(candidate_bucket)
-            # is the size enough? ex: for bucket #5, we need at least 5 dankers
+            # is the size enough? ex: for bucket #5, we need at least 5 gamers
             if size >= i:
                 bucket = candidate_bucket
                 break
@@ -581,9 +581,9 @@ def get_float(s: str, default: Optional[float] = 0.0) -> float:
 
 
 @dataclasses.dataclass(init=False)
-class DankOptions:
+class GameOptions:
     """
-    Represents arguments to the dank.
+    Represents arguments to the game.
     """
 
     future: Optional[datetime.datetime]
@@ -597,7 +597,7 @@ class DankOptions:
         self.bucket = BUCKET_MIN
 
 
-CURRENT_DANK_ARGS = {"cancel", "now", "leave"}
+CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
 
 HUMANIZE_VOWEL_WORDS = {"hour"}
 HUMANIZE_MAPPING = {
@@ -638,30 +638,30 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
 
 async def consume_args(
     args: List[str],
-    danker: discord.Member,
+    gamer: discord.Member,
     created_at: datetime.datetime,
-    options: DankOptions,
-) -> Optional[DankOptions]:
+    options: GameOptions,
+) -> Optional[GameOptions]:
     """
     Handles building options from command arguments by parsing args.
 
-    Returning None means we don't interact with the dank.
+    Returning None means we don't interact with the game.
     """
     control = args.pop(0)
-    # if there's a dank, try to control it
-    if client.current_dank:
+    # if there's a game, try to control it
+    if client.current_game:
         if control == "cancel":
-            await client.current_dank.cancel(created_at)
+            await client.current_game.cancel(created_at)
             return None
         if control == "now":
-            await client.current_dank.advance(created_at)
+            await client.current_game.advance(created_at)
             return None
         if control == "leave":
-            await client.current_dank.remove_danker(danker)
+            await client.current_game.remove_gamer(gamer)
             return None
     else:
-        # sometimes users accidentally try to control a dank when it doesn't exist
-        if control in CURRENT_DANK_ARGS:
+        # sometimes users accidentally try to control a game when it doesn't exist
+        if control in CURRENT_GAME_ARGS:
             return None
         # we need more args than the control for these
         if args:
@@ -806,12 +806,13 @@ async def consume_args(
 
 FUZZ_THRESHOLD = 70
 TOKEN_WORD = "dank"
+TOKEN_SUBJECT_SUFFIX = "rs" if TOKEN_WORD.endswith("e") else "ers"
 TOKEN_TITLE = TOKEN_WORD[0].upper() + TOKEN_WORD[1:]
 
 
-def is_dank(content: str) -> bool:
+def is_game_command(content: str) -> bool:
     """
-    Checks if the message represents a dank "command"
+    Checks if the message represents a game "command"
     """
     # if it is the word, passes
     word = content.split(maxsplit=1)[0]
@@ -845,7 +846,7 @@ async def main():
     mentions.roles = True
 
     # create our client, limit messages to what we need to keep track of
-    client = DankClient(
+    client = GameClient(
         max_messages=500,
         intents=intents,
         allowed_mentions=mentions,
@@ -853,7 +854,7 @@ async def main():
 
     # start the client
     async with client as _client:
-        await _client.start(os.environ["DANK_TOKEN"])
+        await _client.start(os.environ["GAME_BOT_TOKEN"])
 
 
 if os.name == "nt":
