@@ -6,6 +6,7 @@ import math
 import os
 import pathlib
 import socket
+from functools import cache
 
 from typing import Any, Callable
 
@@ -14,11 +15,11 @@ import arrow
 import dateparser
 import datetime
 import discord
+import httpx
 import orjson
 
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
-from opendota.opendota import OpenDota
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code
 from steam.webapi import WebAPI
@@ -76,6 +77,32 @@ class TaskWrapper:
         return f"TaskWrapper<task={self.task}>"
 
 
+class OpenDotaAPI:
+    @staticmethod
+    @cache
+    async def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
+        constants = {}
+        for res in resources:
+            url = f"/constants/{res}"
+            constants[res] = await client.opendota.get(url)
+        return constants
+
+    @staticmethod
+    def query_constant_name(constants: dict[str, dict[str, Any]], resource: str, idx: int) -> str:
+        constant = constants[resource]
+        data = constant[str(idx)]
+        return data["name"].replace(f"{resource}_", "").replace("_", " ").title()
+
+    @staticmethod
+    def query_match_constant(constants: dict[str, dict[str, Any]], match: dict[str, Any], resource: str):
+        return OpenDotaAPI.query_constant_name(constants, resource, match[resource])
+
+    @staticmethod
+    async def get_matches(steam_id: int, **params) -> list[dict[str, Any]]:
+        url = f"/players/{steam_id}/matches"
+        return await client.opendota.get(url, params=params)
+
+
 class GameClient(discord.Client):
     """
     The Discord client for this bot.
@@ -85,6 +112,8 @@ class GameClient(discord.Client):
         """
         Creates a new Discord client.
         """
+        self.opendota = kwargs.pop("opendota")
+
         super().__init__(*args, **kwargs)
 
         self._resolver: aiohttp.AsyncResolver | None = None
@@ -102,10 +131,6 @@ class GameClient(discord.Client):
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
-        self.opendota = OpenDota(
-            data_dir=".dota2",
-            api_key=os.environ["GAME_BOT_OPENDOTA"]
-        )
         self.steamapi = WebAPI(
             key=os.environ["GAME_BOT_STEAM"]
         )
@@ -407,14 +432,13 @@ class DotaMatch(Match):
     def close_match(self):
         self.task.cancel(msg="Closing match")
 
-    def get_recent_match(self) -> dict[str, Any] | None:
-        url = f"/players/{self.steam_id}/matches"
-        data = {
-            "limit": 1,
-            "date": 1,
-            "significant": 0
-        }
-        matches: list[dict[str, Any]] = client.opendota.get(url, data=data)
+    async def get_recent_match(self) -> dict[str, Any] | None:
+        matches: list[dict[str, Any]] = await OpenDotaAPI.get_matches(
+            self.steam_id,
+            limit=1,
+            date=1,
+            significant=0
+        )
         if matches:
             match = matches[0]
             # if this match wasn't relevant for the game we started
@@ -432,8 +456,11 @@ class DotaMatch(Match):
 
     async def check_match(self):
         await asyncio.sleep(MATCH_POLL_INTERVAL)
-        match = self.get_recent_match()
-        if match:
+        match = await self.get_recent_match()
+        self.polls += 1
+        if not match and self.polls < MATCH_MAX_POLLS:
+            self.start_check()
+        else:
             is_dire = match["player_slot"] > 127
             won = match["radiant_win"] ^ is_dire
 
@@ -447,13 +474,9 @@ class DotaMatch(Match):
             embed.add_field(name="Status", value="Win" if won else "Loss")
 
             # match type
-            resources = client.opendota.get_constants(["lobby_type", "game_mode"])
-            lobby_types = resources["lobby_type"]
-            lobby_type: str = lobby_types[str(match["lobby_type"])]["name"]
-            lobby_type = lobby_type.replace("lobby_type_", "").replace("_", " ").title()
-            game_modes = resources["game_mode"]
-            game_mode: str = game_modes[str(match["game_mode"])]["name"]
-            game_mode = game_mode.replace("game_mode_", "").replace("_", " ").title()
+            resources = OpenDotaAPI.get_constants(["lobby_type", "game_mode"])
+            lobby_type = OpenDotaAPI.query_match_constant(resources, match, "lobby_type")
+            game_mode = OpenDotaAPI.query_match_constant(resources, match, "game_mode")
             embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
 
             # timestamp
@@ -467,10 +490,6 @@ class DotaMatch(Match):
 
             # send
             await self.channel.send(embed=embed)
-        self.polls += 1
-        if not match and self.polls < MATCH_MAX_POLLS:
-            self.start_check()
-        else:
             client.current_match = None
 
 
@@ -1201,11 +1220,13 @@ async def main():
     mentions.roles = True
 
     # create our client, limit messages to what we need to keep track of
-    client = GameClient(
-        max_messages=500,
-        intents=intents,
-        allowed_mentions=mentions,
-    )
+    async with httpx.AsyncClient(base_url="https://api.opendota.com", timeout=10.0, http2=True) as opendota:
+        client = GameClient(
+            opendota=opendota,
+            max_messages=500,
+            intents=intents,
+            allowed_mentions=mentions,
+        )
 
     # start the client
     async with client as _client:
