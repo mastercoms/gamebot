@@ -715,7 +715,7 @@ class Game:
                     for gamer in gamers:
                         player = client.players_table.get(Player.id == gamer.id)
                         if player:
-                            steam_id = player.steam
+                            steam_id = player["steam"]
                             break
                     if steam_id:
                         client.current_match = DotaMatch(
@@ -1109,6 +1109,7 @@ async def consume_args(
                 return None
             client.players_table.upsert({"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id)
             await channel.send("Steam ID linked. Matches will now be listed.")
+            return None
         if control == "option":
             if not gamer.guild_permissions.administrator:
                 await channel.send("Not permitted to set/get options.")
@@ -1125,6 +1126,7 @@ async def consume_args(
                 await channel.send(f"{option}={new_value}")
             else:
                 await channel.send(f"{option}={get_value(option)}")
+            return None
         # if buckets
         if control == "if":
             options.bucket = get_int(args.pop(0), BUCKET_MIN)
