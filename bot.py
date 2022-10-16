@@ -44,6 +44,17 @@ def create_task(coro, *, name=None):
     return TaskWrapper(task)
 
 
+def get_channel(channel: discord.TextChannel) -> discord.TextChannel:
+    settings_channel = get_value("channel_id", table=client.settings_table)
+    if settings_channel:
+        guild = None
+        for guild in client.guilds:
+            break
+        if guild is not None:
+            settings_channel = guild.get_channel(settings_channel)
+    return settings_channel or channel
+
+
 class TaskWrapper:
     def __init__(self, task):
         self.task = task
@@ -92,7 +103,7 @@ class GameClient(discord.Client):
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
         self.opendota = OpenDota(
-            data_dir="~/.dota2",
+            data_dir=".dota2",
             api_key=os.environ["GAME_BOT_OPENDOTA"]
         )
         self.steamapi = WebAPI(
@@ -124,7 +135,7 @@ class GameClient(discord.Client):
             break
         if guild is None:
             return
-        self.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
+        self.now = utcnow()
         for save in self.backup_table.all():
             save = save["v"]
             channel = guild.get_channel(save["channel"])
@@ -150,7 +161,7 @@ class GameClient(discord.Client):
             break
         self.backup_table.truncate()
 
-    async def on_message(self, message):
+    async def on_message(self, message: discord.Message):
         """
         Handles new game messages.
         """
@@ -179,7 +190,7 @@ class GameClient(discord.Client):
                     # consume all args
                     while args:
                         options = await consume_args(
-                            args, gamer, message.created_at, message.channel, options
+                            args, gamer, message.created_at, get_channel(message.channel), options
                         )
                         # if we cleared options, then we stop here
                         if not options:
@@ -195,53 +206,61 @@ class GameClient(discord.Client):
                         # if didn't get a date, default to delta
                         if not options.future:
                             options.future = self.now + DEFAULT_DELTA
-                        self.current_game = Game(message.channel, gamer, options.game)
+                        self.current_game = Game(get_channel(message.channel), gamer, options.game)
                         await self.current_game.start(options.future)
 
                     # add to game
                     await self.current_game.add_gamer(message.author, options.bucket)
         except:
-            await message.channel.send("An unexpected error occurred.")
+            await get_channel(message.channel).send("An unexpected error occurred.")
 
 
 client: GameClient | None = None
 
+Setting = Query()
 Player = Query()
 Store = Query()
 
 
-def get_value(key: str, default: Any = None) -> Any:
+def get_value(key: str, default: Any = None, table=None) -> Any:
     """
     Gets from the key value DB table.
     """
-    res = client.db.get(Store.k == key)
+    table_interface = table or client.db
+    res = table_interface.get(Store.k == key)
     if res:
         return res["v"]
     else:
         return default
 
 
-def set_value(key: str, val: Any):
+def set_value(key: str, val: Any, table=None):
     """
     Sets to the key value DB table.
     """
-    client.db.upsert({"k": key, "v": val}, Store.k == key)
+    table_interface = table or client.db
+    table_interface.upsert({"k": key, "v": val}, Store.k == key)
 
 
-def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None) -> Any:
+def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None, table=None) -> Any:
     """
     Gets an existing value in the key value DB table and updates it using update_fn.
     :return: The new value
     """
-    old = get_value(key, default)
+    table_interface = table or client.db
+    old = get_value(key, default, table=table_interface)
     new = update_fn(old)
-    set_value(key, new)
+    set_value(key, new, table=table_interface)
     return new
 
 
 TIMESTAMP_TIMEZONE = datetime.timezone.utc
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
 TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
+
+
+def utcnow() -> datetime.datetime:
+    return datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
 
 
 def generate_timestamp(dt: datetime.datetime) -> int:
@@ -375,7 +394,7 @@ class DotaMatch(Match):
     def __init__(self, steam_id: int, party_size: int, channel: discord.TextChannel):
         self.steam_id = steam_id
         self.party_size = party_size
-        self.timestamp = generate_timestamp(datetime.datetime.utcnow())
+        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(hours=2))
         self.polls = 1
         self.channel = channel
         self.task = None
@@ -392,25 +411,26 @@ class DotaMatch(Match):
         data = {
             "limit": 1,
             "date": 1,
-            "significant": 0
+            "significant": 0,
+            "sort": "start_time"
         }
-        matches = client.opendota.get(url, data=data)
+        matches: list[dict[str, Any]] = client.opendota.get(url, data=data)
         if matches:
             match = matches[0]
             # if this match wasn't relevant for the game we started
-            if match.party_size < self.party_size:
+            if match["party_size"] < self.party_size:
                 return None
             # if this match ended prematurely
-            if match.leaver_status != 0:
+            if match["leaver_status"] != 0:
                 return None
             # if this match started before the game started
-            if match.start_time < self.timestamp:
+            if match["start_time"] < self.timestamp:
                 return None
+            return match
         else:
             return None
 
     async def check_match(self):
-        await asyncio.sleep(MATCH_POLL_INTERVAL)
         match = self.get_recent_match()
         if match:
             is_dire = match["player_slot"] > 127
@@ -428,10 +448,10 @@ class DotaMatch(Match):
             # match type
             resources = client.opendota.get_constants(["lobby_type", "game_mode"])
             lobby_types = resources["lobby_type"]
-            lobby_type: str = lobby_types[match["lobby_type"]]["name"]
+            lobby_type: str = lobby_types[str(match["lobby_type"])]["name"]
             lobby_type = lobby_type.replace("lobby_type_", "").replace("_", " ").title()
             game_modes = resources["game_mode"]
-            game_mode: str = game_modes[match["game_mode"]]["name"]
+            game_mode: str = game_modes[str(match["game_mode"])]["name"]
             game_mode = game_mode.replace("game_mode_", "").replace("_", " ").title()
             embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
 
@@ -448,6 +468,7 @@ class DotaMatch(Match):
             await self.channel.send(embed=embed)
         self.polls += 1
         if not match and self.polls < MATCH_MAX_POLLS:
+            await asyncio.sleep(MATCH_POLL_INTERVAL)
             self.start_check()
         else:
             client.current_match = None
@@ -515,7 +536,7 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
         }
-        client.backup_table.upsert({"k": "saved", "v": data}, Store.k == "saved")
+        set_value("saved", data, table=client.backup_table)
 
     def reset(self):
         """
@@ -725,7 +746,7 @@ class Game:
                         )
             else:
                 # start the game up again
-                client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
+                client.now = utcnow()
                 self.reset()
                 create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
@@ -806,7 +827,7 @@ class Game:
         return bucket
 
 
-def get_int(s: str, default: int | None = 0) -> int:
+def get_int(s: str, default: int | None = 0) -> int | None:
     """
     Tries to get an int from a string, if fails, returns default.
     """
@@ -1118,14 +1139,19 @@ async def consume_args(
             option = args.pop(0)
             if option_mode == "set":
                 new_value = args.pop(0)
+                if "id" in option:
+                    tmp = new_value
+                    new_value = get_int(new_value, default=None)
+                    if new_value is None:
+                        new_value = tmp
 
                 def set_new_value(old):
                     return new_value
 
-                new_value = update_value(set_new_value, option)
+                new_value = update_value(set_new_value, option, client.settings_table)
                 await channel.send(f"{option}={new_value}")
             else:
-                await channel.send(f"{option}={get_value(option)}")
+                await channel.send(f"{option}={get_value(option, client.settings_table)}")
             return None
         # if buckets
         if control == "if":
