@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import dataclasses
 import math
@@ -5,7 +7,7 @@ import os
 import pathlib
 import socket
 
-from typing import Dict, Set, List, Optional, Any, Callable
+from typing import Any, Callable
 
 import aiohttp
 import arrow
@@ -16,7 +18,10 @@ import orjson
 
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
+from opendota.opendota import OpenDota
 from pytz import timezone
+from steam.steamid import SteamID, from_invite_code
+from steam.webapi import WebAPI
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
@@ -71,18 +76,28 @@ class GameClient(discord.Client):
         """
         super().__init__(*args, **kwargs)
 
-        self._resolver: Optional[aiohttp.AsyncResolver] = None
-        self._connector: Optional[aiohttp.TCPConnector] = None
+        self._resolver: aiohttp.AsyncResolver | None = None
+        self._connector: aiohttp.TCPConnector | None = None
 
-        self.current_game: Optional[Game] = None
-        self.now: Optional[datetime.datetime] = None
+        self.current_game: Game | None = None
+        self.current_match: Match | None = None
+        self.now: datetime.datetime | None = None
 
-        self.lock: Optional[asyncio.Lock] = None
+        self.lock: asyncio.Lock | None = None
 
         self.db = TinyDB(
             pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
         )
         self.backup_table = self.db.table("backup")
+        self.players_table = self.db.table("players")
+        self.settings_table = self.db.table("settings")
+        self.opendota = OpenDota(
+            data_dir="~/.dota2",
+            api_key=os.environ["GAME_BOT_OPENDOTA"]
+        )
+        self.steamapi = WebAPI(
+            key=os.environ["GAME_BOT_STEAM"]
+        )
 
     async def setup_hook(self) -> None:
         """
@@ -139,55 +154,59 @@ class GameClient(discord.Client):
         """
         Handles new game messages.
         """
-        # not a bot
-        if message.author.bot:
-            return
+        try:
+            # not a bot
+            if message.author.bot:
+                return
 
-        # if only an embed, then there's no content to parse
-        if not message.content:
-            return
+            # if only an embed, then there's no content to parse
+            if not message.content:
+                return
 
-        # normalize
-        message.content = message.content.lower()
+            # normalize
+            message.content = message.content.lower()
 
-        if is_game_command(message.content):
-            async with self.lock:
-                # set our global now to when the message was made
-                self.now = message.created_at
+            if is_game_command(message.content):
+                async with self.lock:
+                    # set our global now to when the message was made
+                    self.now = message.created_at
 
-                # set up our arg parser
-                args = message.content.split()[1:]
-                gamer = message.author
-                options = GameOptions()
+                    # set up our arg parser
+                    args = message.content.split()[1:]
+                    gamer = message.author
+                    options = GameOptions()
 
-                # consume all args
-                while args:
-                    options = await consume_args(
-                        args, gamer, message.created_at, options
-                    )
-                    # if we cleared options, then we stop here
-                    if not options:
-                        return
+                    # consume all args
+                    while args:
+                        options = await consume_args(
+                            args, gamer, message.created_at, message.channel, options
+                        )
+                        # if we cleared options, then we stop here
+                        if not options:
+                            return
 
-                # are we going to start a game?
-                if not self.current_game:
-                    # check if it's sufficiently in the future
-                    if options.future:
-                        delta = options.future - self.now
-                        if delta < DEFAULT_DELTA:
-                            options.future = None
-                    # if didn't get a date, default to delta
-                    if not options.future:
-                        options.future = self.now + DEFAULT_DELTA
-                    self.current_game = Game(message.channel, gamer, options.game)
-                    await self.current_game.start(options.future)
+                    # are we going to start a game?
+                    if not self.current_game:
+                        # check if it's sufficiently in the future
+                        if options.future:
+                            delta = options.future - self.now
+                            if delta < DEFAULT_DELTA:
+                                options.future = None
+                        # if didn't get a date, default to delta
+                        if not options.future:
+                            options.future = self.now + DEFAULT_DELTA
+                        self.current_game = Game(message.channel, gamer, options.game)
+                        await self.current_game.start(options.future)
 
-                # add to game
-                await self.current_game.add_gamer(message.author, options.bucket)
+                    # add to game
+                    await self.current_game.add_gamer(message.author, options.bucket)
+        except:
+            await message.channel.send("An unexpected error occurred.")
 
 
-client: Optional[GameClient] = None
+client: GameClient | None = None
 
+Player = Query()
 Store = Query()
 
 
@@ -233,11 +252,14 @@ def generate_timestamp(dt: datetime.datetime) -> int:
     return delta // TIMESTAMP_GRANULARITY
 
 
-def print_timestamp(timestamp: int, style: str) -> str:
+def print_timestamp(timestamp: int, style: str | None = None) -> str:
     """
     Gets a Discord string representing a UNIX timestamp.
     """
-    return f"<t:{timestamp}:{style}>"
+    if style:
+        return f"<t:{timestamp}:{style}>"
+    else:
+        return f"<t:{timestamp}>"
 
 
 def generate_datetime(timestamp: int) -> datetime.datetime:
@@ -262,24 +284,193 @@ def increment(val: int) -> int:
     return val + 1
 
 
+MATCH_POLL_INTERVAL = 5 * 60
+MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL
+
+
+class Match:
+    pass
+
+
+DOTA_RANKS = {
+    0: "Uncalibrated",
+
+    10: "Herald",
+    11: "Herald [1]",
+    12: "Herald [2]",
+    13: "Herald [3]",
+    14: "Herald [4]",
+    15: "Herald [5]",
+    16: "Herald [6]",
+    17: "Herald [7]",
+
+    20: "Guardian",
+    21: "Guardian [1]",
+    22: "Guardian [2]",
+    23: "Guardian [3]",
+    24: "Guardian [4]",
+    25: "Guardian [5]",
+    26: "Guardian [6]",
+    27: "Guardian [7]",
+
+    30: "Crusader",
+    31: "Crusader [1]",
+    32: "Crusader [2]",
+    33: "Crusader [3]",
+    34: "Crusader [4]",
+    35: "Crusader [5]",
+    36: "Crusader [6]",
+    37: "Crusader [7]",
+
+    40: "Archon",
+    41: "Archon [1]",
+    42: "Archon [2]",
+    43: "Archon [3]",
+    44: "Archon [4]",
+    45: "Archon [5]",
+    46: "Archon [6]",
+    47: "Archon [7]",
+
+    50: "Legend",
+    51: "Legend [1]",
+    52: "Legend [2]",
+    53: "Legend [3]",
+    54: "Legend [4]",
+    55: "Legend [5]",
+    56: "Legend [6]",
+    57: "Legend [7]",
+
+    60: "Ancient",
+    61: "Ancient [1]",
+    62: "Ancient [2]",
+    63: "Ancient [3]",
+    64: "Ancient [4]",
+    65: "Ancient [5]",
+    66: "Ancient [6]",
+    67: "Ancient [7]",
+
+    70: "Divine",
+    71: "Divine [1]",
+    72: "Divine [2]",
+    73: "Divine [3]",
+    74: "Divine [4]",
+    75: "Divine [5]",
+    76: "Divine [6]",
+    77: "Divine [7]",
+
+    80: "Immortal",
+    81: "Immortal",
+    82: "Immortal",
+}
+
+
+class DotaMatch(Match):
+    steam_id: int
+    party_size: int
+    timestamp: int
+    polls: int
+    channel: discord.TextChannel
+    task: TaskWrapper | None
+
+    def __init__(self, steam_id: int, party_size: int, channel: discord.TextChannel):
+        self.steam_id = steam_id
+        self.party_size = party_size
+        self.timestamp = generate_timestamp(datetime.datetime.utcnow())
+        self.polls = 1
+        self.channel = channel
+        self.task = None
+        self.start_check()
+
+    def start_check(self):
+        self.task = create_task(self.check_match(), name="Match Check")
+
+    def close_match(self):
+        self.task.cancel(msg="Closing match")
+
+    def get_recent_match(self) -> dict[str, Any] | None:
+        url = f"/players/{self.steam_id}/matches"
+        data = {
+            "limit": 1,
+            "date": 1,
+            "significant": 0
+        }
+        matches = client.opendota.get(url, data=data)
+        if matches:
+            match = matches[0]
+            # if this match wasn't relevant for the game we started
+            if match.party_size < self.party_size:
+                return None
+            # if this match ended prematurely
+            if match.leaver_status != 0:
+                return None
+            # if this match started before the game started
+            if match.start_time < self.timestamp:
+                return None
+        else:
+            return None
+
+    async def check_match(self):
+        await asyncio.sleep(MATCH_POLL_INTERVAL)
+        match = self.get_recent_match()
+        if match:
+            is_dire = match["player_slot"] > 127
+            won = match["radiant_win"] ^ is_dire
+
+            # create embed
+            embed = discord.Embed(
+                colour=discord.Colour.green() if won else discord.Colour.red(),
+                title="Match Played",
+            )
+
+            # win or loss
+            embed.add_field(name="Status", value="Win" if won else "Loss")
+
+            # match type
+            resources = client.opendota.get_constants(["lobby_type", "game_mode"])
+            lobby_types = resources["lobby_type"]
+            lobby_type: str = lobby_types[match["lobby_type"]]["name"]
+            lobby_type = lobby_type.replace("lobby_type_", "").replace("_", " ").title()
+            game_modes = resources["game_mode"]
+            game_mode: str = game_modes[match["game_mode"]]["name"]
+            game_mode = game_mode.replace("game_mode_", "").replace("_", " ").title()
+            embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
+
+            # timestamp
+            embed.add_field(name="Time", value=print_timestamp(match["start_time"]))
+            # rank
+            embed.add_field(name="Rank", value=DOTA_RANKS.get(match["average_rank"]) or "Unknown")
+
+            # duration
+            minutes, seconds = divmod(match["duration"], 60)
+            embed.add_field(name="Duration", value=f"{minutes}:{seconds:02}")
+
+            # send
+            await self.channel.send(embed=embed)
+        self.polls += 1
+        if not match and self.polls < MATCH_MAX_POLLS:
+            self.start_check()
+        else:
+            client.current_match = None
+
+
 class Game:
     """
     Represents a pending/active Game.
     """
 
-    group_buckets: Dict[int, Set[discord.Member]]
-    gamer_buckets: Dict[discord.Member, int]
+    group_buckets: dict[int, set[discord.Member]]
+    gamer_buckets: dict[discord.Member, int]
     future: datetime.datetime
     timestamp: int
     is_checking: bool
     author: discord.Member
     channel: discord.TextChannel
     game_name: str
-    message: Optional[discord.Message]
-    task: Optional[TaskWrapper]
+    message: discord.Message | None
+    task: TaskWrapper | None
     has_initial: bool
-    was_scheduled: Optional[bool]
-    base_mention: Optional[str]
+    was_scheduled: bool | None
+    base_mention: str | None
 
     def __init__(
         self,
@@ -507,16 +698,31 @@ class Game:
         Either finishes the game check, or starts one if it is scheduled.
         """
         gamers = self.get_gamers()
-        if len(gamers) > 1:
+        num_gamers = len(gamers)
+        if num_gamers > 1:
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
                 # finish the game
                 await self.channel.send(
-                    f"{mention} {KEYWORD_TITLE} Check complete. **{len(gamers)}/5** players ready to {KEYWORD}."
+                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/5** players ready to {KEYWORD}."
                 )
                 # we had a game
                 set_value("no_gamers_consecutive", 0)
+                # track dota matches
+                if self.game_name == "dota":
+                    steam_id = None
+                    for gamer in gamers:
+                        player = client.players_table.get(Player.id == gamer.id)
+                        if player:
+                            steam_id = player.steam
+                            break
+                    if steam_id:
+                        client.current_match = DotaMatch(
+                            steam_id=steam_id,
+                            party_size=num_gamers,
+                            channel=self.channel
+                        )
             else:
                 # start the game up again
                 client.now = datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
@@ -577,7 +783,7 @@ class Game:
             await self.update_timestamp(now)
         await self.finish()
 
-    def get_gamers(self) -> Set[discord.Member]:
+    def get_gamers(self) -> set[discord.Member]:
         """
         Gets available gamers, according to the largest satisfied bucket.
         """
@@ -600,7 +806,7 @@ class Game:
         return bucket
 
 
-def get_int(s: str, default: Optional[int] = 0) -> int:
+def get_int(s: str, default: int | None = 0) -> int:
     """
     Tries to get an int from a string, if fails, returns default.
     """
@@ -611,7 +817,7 @@ def get_int(s: str, default: Optional[int] = 0) -> int:
         return default
 
 
-def get_float(s: str, default: Optional[float] = 0.0) -> float:
+def get_float(s: str, default: float | None = 0.0) -> float:
     """
     Tries to get a float from a string, if fails, returns default.
     """
@@ -628,9 +834,9 @@ class GameOptions:
     Represents arguments to the game.
     """
 
-    future: Optional[datetime.datetime]
+    future: datetime.datetime | None
     bucket: int
-    game: Optional[str]
+    game: str | None
 
     def __init__(self):
         """
@@ -680,12 +886,20 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
     return f"{base}, {convert_humanize_decimal(lesser_quantity, lesser_unit)}"
 
 
+def try_steam_id(steam_id: str | int) -> SteamID | None:
+    try:
+        return SteamID(steam_id)
+    except:
+        return None
+
+
 async def consume_args(
-    args: List[str],
+    args: list[str],
     gamer: discord.Member,
     created_at: datetime.datetime,
+    channel: discord.TextChannel,
     options: GameOptions,
-) -> Optional[GameOptions]:
+) -> GameOptions | None:
     """
     Handles building options from command arguments by parsing args.
 
@@ -851,6 +1065,66 @@ async def consume_args(
                     return options
 
     if args:
+        if control == "register":
+            id_arg = args.pop(0)
+            # try to parse a Steam ID if there is one
+            steam_id = try_steam_id(id_arg)
+            # try friend code
+            if not steam_id:
+                steam_id = from_invite_code(id_arg)
+            # try user profile
+            if not steam_id:
+                friend_code = id_arg
+                if "steamcommunity.com/user/" in friend_code:
+                    if not friend_code.startswith("http"):
+                        friend_code = "https://" + friend_code
+                    friend_code = friend_code.replace("steamcommunity.com/user", "https://s.team/p")
+                    steam_id = from_invite_code(friend_code)
+            # try profiles URL
+            if not steam_id:
+                profile_id = id_arg
+                if "steamcommunity.com/profiles/" in profile_id:
+                    if not profile_id.startswith("http"):
+                        profile_id = "https://" + profile_id
+                    profile_id = profile_id.replace("steamcommunity.com/profiles/", "")
+                    profile_id = profile_id.replace("https://", "")
+                    profile_id = profile_id.replace("http://", "")
+                    steam_id = try_steam_id(profile_id)
+            # try vanity URL
+            if not steam_id:
+                vanity = id_arg
+                if "steamcommunity.com/id/" in vanity:
+                    if not vanity.startswith("http"):
+                        new_id_arg = "https://" + vanity
+                    vanity = vanity.replace("steamcommunity.com/id/", "")
+                    vanity = vanity.replace("https://", "")
+                    vanity = vanity.replace("http://", "")
+                # either a /id/ URL or a raw vanity
+                resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
+                vanity = resp.get("response", {}).get("steamid")
+                if vanity:
+                    steam_id = try_steam_id(vanity)
+            if not steam_id:
+                await channel.send("Steam ID not found.")
+                return None
+            client.players_table.upsert({"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id)
+            await channel.send("Steam ID linked. Matches will now be listed.")
+        if control == "option":
+            if not gamer.guild_permissions.administrator:
+                await channel.send("Not permitted to set/get options.")
+                return None
+            option_mode = args.pop(0)
+            option = args.pop(0)
+            if option_mode == "set":
+                new_value = args.pop(0)
+
+                def set_new_value(old):
+                    return new_value
+
+                new_value = update_value(set_new_value, option)
+                await channel.send(f"{option}={new_value}")
+            else:
+                await channel.send(f"{option}={get_value(option)}")
         # if buckets
         if control == "if":
             options.bucket = get_int(args.pop(0), BUCKET_MIN)
