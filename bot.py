@@ -474,7 +474,7 @@ class DotaMatch(Match):
             embed.add_field(name="Status", value="Win" if won else "Loss")
 
             # match type
-            resources = OpenDotaAPI.get_constants(["lobby_type", "game_mode"])
+            resources = await OpenDotaAPI.get_constants(["lobby_type", "game_mode"])
             lobby_type = OpenDotaAPI.query_match_constant(resources, match, "lobby_type")
             game_mode = OpenDotaAPI.query_match_constant(resources, match, "game_mode")
             embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
