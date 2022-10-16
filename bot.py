@@ -211,7 +211,8 @@ class GameClient(discord.Client):
 
                     # add to game
                     await self.current_game.add_gamer(message.author, options.bucket)
-        except:
+        except Exception as e:
+            print(e)
             await get_channel(message.channel).send("An unexpected error occurred.")
 
 
@@ -394,7 +395,7 @@ class DotaMatch(Match):
     def __init__(self, steam_id: int, party_size: int, channel: discord.TextChannel):
         self.steam_id = steam_id
         self.party_size = party_size
-        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(hours=2))
+        self.timestamp = generate_timestamp(utcnow())
         self.polls = 1
         self.channel = channel
         self.task = None
@@ -411,8 +412,7 @@ class DotaMatch(Match):
         data = {
             "limit": 1,
             "date": 1,
-            "significant": 0,
-            "sort": "start_time"
+            "significant": 0
         }
         matches: list[dict[str, Any]] = client.opendota.get(url, data=data)
         if matches:
@@ -431,6 +431,7 @@ class DotaMatch(Match):
             return None
 
     async def check_match(self):
+        await asyncio.sleep(MATCH_POLL_INTERVAL)
         match = self.get_recent_match()
         if match:
             is_dire = match["player_slot"] > 127
@@ -468,7 +469,6 @@ class DotaMatch(Match):
             await self.channel.send(embed=embed)
         self.polls += 1
         if not match and self.polls < MATCH_MAX_POLLS:
-            await asyncio.sleep(MATCH_POLL_INTERVAL)
             self.start_check()
         else:
             client.current_match = None
