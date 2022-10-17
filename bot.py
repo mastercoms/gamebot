@@ -6,7 +6,6 @@ import math
 import os
 import pathlib
 import socket
-from functools import cache
 
 from typing import Any, Callable
 
@@ -107,6 +106,11 @@ class OpenDotaAPI:
     async def get_matches(steam_id: int, **params) -> list[dict[str, Any]]:
         url = f"/players/{steam_id}/matches"
         return await OpenDotaAPI.get(url, params=params)
+
+    @staticmethod
+    async def get_match(match_id: int) -> dict[str, Any]:
+        url = f"/matches/{match_id}"
+        return await OpenDotaAPI.get(url)
 
 
 class GameClient(discord.Client):
@@ -335,8 +339,10 @@ def increment(val: int) -> int:
     return val + 1
 
 
-MATCH_POLL_INTERVAL = 5 * 60
-MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL
+MATCH_POLL_INTERVALS = [10 * 60, 10 * 60, 5 * 60]
+MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
+MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
+MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
 
 
 class Match:
@@ -344,7 +350,7 @@ class Match:
 
 
 DOTA_RANKS = {
-    0: "Uncalibrated",
+    0: "Unknown",
 
     10: "Herald",
     11: "Herald [1]",
@@ -412,6 +418,8 @@ DOTA_RANKS = {
     80: "Immortal",
     81: "Immortal",
     82: "Immortal",
+    83: "Immortal",
+    84: "Immortal",
 }
 
 
@@ -427,7 +435,7 @@ class DotaMatch(Match):
         self.steam_id = steam_id
         self.party_size = party_size
         self.timestamp = generate_timestamp(utcnow())
-        self.polls = 1
+        self.polls = 0
         self.channel = channel
         self.task = None
         self.start_check()
@@ -437,6 +445,12 @@ class DotaMatch(Match):
 
     def close_match(self):
         self.task.cancel(msg="Closing match")
+
+    def get_poll_interval(self):
+        if self.polls < MATCH_POLL_INTERVAL_COUNT:
+            return MATCH_POLL_INTERVALS[self.polls]
+        else:
+            return MATCH_POLL_INTERVAL_LAST
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await OpenDotaAPI.get_matches(
@@ -461,7 +475,7 @@ class DotaMatch(Match):
             return None
 
     async def check_match(self):
-        await asyncio.sleep(MATCH_POLL_INTERVAL)
+        await asyncio.sleep(self.get_poll_interval())
         match = await self.get_recent_match()
         self.polls += 1
         if not match and self.polls < MATCH_MAX_POLLS:
@@ -470,14 +484,21 @@ class DotaMatch(Match):
             is_dire = match["player_slot"] > 127
             won = match["radiant_win"] ^ is_dire
 
+            # match ID
+            match_id = match["match_id"]
+
             # create embed
             embed = discord.Embed(
                 colour=discord.Colour.green() if won else discord.Colour.red(),
-                title="Match Played",
+                title=f"Match {match_id}",
+                url=f"https://www.dotabuff.com/matches/{match_id}"
             )
 
             # win or loss
             embed.add_field(name="Status", value="Win" if won else "Loss")
+
+            # team
+            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant")
 
             # match type
             resources = await OpenDotaAPI.get_constants("lobby_type", "game_mode")
