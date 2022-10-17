@@ -18,6 +18,7 @@ import discord
 import httpx
 import orjson
 
+from async_lru import alru_cache
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from pytz import timezone
@@ -84,7 +85,7 @@ class OpenDotaAPI:
         return resp.json()
 
     @staticmethod
-    @cache
+    @alru_cache
     async def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
         constants = {}
         for res in resources:
