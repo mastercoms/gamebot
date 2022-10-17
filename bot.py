@@ -79,12 +79,17 @@ class TaskWrapper:
 
 class OpenDotaAPI:
     @staticmethod
+    async def get(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
+        resp = await client.opendota.get(*args, **kwargs)
+        return resp.json()
+
+    @staticmethod
     @cache
     async def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
         constants = {}
         for res in resources:
             url = f"/constants/{res}"
-            constants[res] = await client.opendota.get(url)
+            constants[res] = await OpenDotaAPI.get(url)
         return constants
 
     @staticmethod
@@ -100,7 +105,7 @@ class OpenDotaAPI:
     @staticmethod
     async def get_matches(steam_id: int, **params) -> list[dict[str, Any]]:
         url = f"/players/{steam_id}/matches"
-        return await client.opendota.get(url, params=params)
+        return await OpenDotaAPI.get(url, params=params)
 
 
 class GameClient(discord.Client):
@@ -474,7 +479,7 @@ class DotaMatch(Match):
             embed.add_field(name="Status", value="Win" if won else "Loss")
 
             # match type
-            resources = await OpenDotaAPI.get_constants(["lobby_type", "game_mode"])
+            resources = await OpenDotaAPI.get_constants("lobby_type", "game_mode")
             lobby_type = OpenDotaAPI.query_match_constant(resources, match, "lobby_type")
             game_mode = OpenDotaAPI.query_match_constant(resources, match, "game_mode")
             embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
@@ -1219,8 +1224,9 @@ async def main():
     mentions.users = True
     mentions.roles = True
 
-    # create our client, limit messages to what we need to keep track of
-    async with httpx.AsyncClient(base_url="https://api.opendota.com", timeout=10.0, http2=True) as opendota:
+    # create opendota API HTTP client
+    async with httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True) as opendota:
+        # create our client, limit messages to what we need to keep track of
         client = GameClient(
             opendota=opendota,
             max_messages=500,
@@ -1228,9 +1234,9 @@ async def main():
             allowed_mentions=mentions,
         )
 
-    # start the client
-    async with client as _client:
-        await _client.start(os.environ["GAME_BOT_TOKEN"])
+        # start the client
+        async with client as _client:
+            await _client.start(os.environ["GAME_BOT_TOKEN"])
 
 
 if os.name == "nt":
