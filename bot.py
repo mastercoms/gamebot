@@ -141,9 +141,11 @@ class GameClient(discord.Client):
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
-        self.steamapi = WebAPI(
-            key=os.environ["GAME_BOT_STEAM"]
-        )
+        steam_api_key = os.getenv("GAME_BOT_STEAM")
+        if steam_api_key is not None:
+            self.steamapi = WebAPI(
+                key=steam_api_key
+            )
 
     async def setup_hook(self) -> None:
         """
@@ -1138,15 +1140,12 @@ async def consume_args(
             steam_id = try_steam_id(id_arg)
             # try friend code
             if not steam_id:
-                steam_id = from_invite_code(id_arg)
-            # try user profile
-            if not steam_id:
-                friend_code = id_arg
+                friend_code = id_arg.rstrip("/")
                 if "steamcommunity.com/user/" in friend_code:
                     if not friend_code.startswith("http"):
                         friend_code = "https://" + friend_code
-                    friend_code = friend_code.replace("steamcommunity.com/user", "https://s.team/p")
-                    steam_id = from_invite_code(friend_code)
+                    friend_code = friend_code.replace("steamcommunity.com/user", "s.team/p")
+                steam_id = from_invite_code(friend_code)
             # try profiles URL
             if not steam_id:
                 profile_id = id_arg
@@ -1156,16 +1155,18 @@ async def consume_args(
                     profile_id = profile_id.replace("steamcommunity.com/profiles/", "")
                     profile_id = profile_id.replace("https://", "")
                     profile_id = profile_id.replace("http://", "")
+                    profile_id = profile_id.rstrip("/")
                     steam_id = try_steam_id(profile_id)
             # try vanity URL
-            if not steam_id:
+            if not steam_id and client.steamapi:
                 vanity = id_arg
                 if "steamcommunity.com/id/" in vanity:
                     if not vanity.startswith("http"):
-                        new_id_arg = "https://" + vanity
+                        vanity = "https://" + vanity
                     vanity = vanity.replace("steamcommunity.com/id/", "")
                     vanity = vanity.replace("https://", "")
                     vanity = vanity.replace("http://", "")
+                    vanity = vanity.rstrip("/")
                 # either a /id/ URL or a raw vanity
                 resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
                 vanity = resp.get("response", {}).get("steamid")
