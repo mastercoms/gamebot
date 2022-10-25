@@ -178,7 +178,11 @@ class SteamWorker:
             print(f"Reconnect in {delay}...", )
 
     def login(self, username, password):
-        self.steam.cli_login(username, password)
+        two_factor_code = input("Enter 2FA code: ")
+        if two_factor_code or os.path.exists(self.steam._get_sentry_path(username)):
+            self.steam.login(username, password, two_factor_code=two_factor_code)
+        else:
+            self.steam.cli_login(username, password)
 
     def close(self):
         if client.dotaclient:
@@ -619,6 +623,15 @@ class DotaMatch(Match):
 
     def query_realtime(self, channel: discord.TextChannel):
         # request spectate for steam server ID
+        jobid = client.dotaclient.request_profile_card(self.steam_id)
+        def test1(account_id, profile_card):
+            print(account_id, profile_card)
+        def test2(message):
+            print(message)
+        client.dotaclient.once(jobid, test2)
+        client.dotaclient.once("profile_card", test1)
+        if True:
+            return
         jobid = client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
             "steam_id": self.steam_id,
             "live": False
