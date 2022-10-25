@@ -710,7 +710,7 @@ class DotaMatch(Match):
             else:
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
-        client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGame, handle_resp)
+        client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
         while wait_msg[0]:
             gevent.idle()
 
