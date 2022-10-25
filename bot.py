@@ -594,7 +594,7 @@ class DotaMatch(Match):
 
     def query_realtime(self, channel: discord.TextChannel):
         # request spectate for steam server ID
-        client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
+        jobid = client.dotaclient.send_job(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
             "steam_id": self.steam_id,
             "live": False
         })
@@ -687,7 +687,7 @@ class DotaMatch(Match):
             else:
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
-        client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
+        client.dotaclient.once(jobid, handle_resp)
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
