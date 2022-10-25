@@ -6,6 +6,7 @@ import math
 import os
 import pathlib
 import socket
+from copy import deepcopy
 
 from typing import Any, Callable
 
@@ -23,6 +24,9 @@ from discord import Intents, AllowedMentions
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code
 from steam.webapi import WebAPI
+from steam.client import SteamClient
+from dota2.client import Dota2Client
+from dota2.proto_enums import EDOTAGCMsg
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
@@ -77,7 +81,7 @@ class TaskWrapper:
         return f"TaskWrapper<task={self.task}>"
 
 
-class OpenDotaAPI:
+class DotaAPI:
     @staticmethod
     async def get(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
         resp = await client.opendota.get(*args, **kwargs)
@@ -89,7 +93,7 @@ class OpenDotaAPI:
         constants = {}
         for res in resources:
             url = f"/constants/{res}"
-            constants[res] = await OpenDotaAPI.get(url)
+            constants[res] = await DotaAPI.get(url)
         return constants
 
     @staticmethod
@@ -100,17 +104,68 @@ class OpenDotaAPI:
 
     @staticmethod
     def query_match_constant(constants: dict[str, dict[str, Any]], match: dict[str, Any], resource: str):
-        return OpenDotaAPI.query_constant_name(constants, resource, match[resource])
+        return DotaAPI.query_constant_name(constants, resource, match[resource])
 
     @staticmethod
     async def get_matches(steam_id: int, **params) -> list[dict[str, Any]]:
         url = f"/players/{steam_id}/matches"
-        return await OpenDotaAPI.get(url, params=params)
+        return await DotaAPI.get(url, params=params)
 
     @staticmethod
-    async def get_match(match_id: int) -> dict[str, Any]:
-        url = f"/matches/{match_id}"
-        return await OpenDotaAPI.get(url)
+    def get_match(match_id: int) -> dict[str, Any]:
+        return client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=match_id)["result"]
+
+
+class SteamWorker:
+    def __init__(self):
+        self.logged_on_once = False
+
+        self.steam = worker = SteamClient()
+        worker.set_credential_location(".")
+
+        @worker.on("error")
+        def handle_error(result):
+            print("Logon result: %s", repr(result))
+
+        @worker.on("connected")
+        def handle_connected():
+            print("Connected to %s", worker.current_server_addr)
+
+        @worker.on("channel_secured")
+        def send_login():
+            if self.logged_on_once and self.steam.relogin_available:
+                self.steam.relogin()
+
+        @worker.on("logged_on")
+        def handle_after_logon():
+            self.logged_on_once = True
+
+            print("-"*30)
+            print("Logged on as: %s", worker.user.name)
+            print("Community profile: %s", worker.steam_id.community_url)
+            print("Last logon: %s", worker.user.last_logon)
+            print("Last logoff: %s", worker.user.last_logoff)
+            print("-"*30)
+
+        @worker.on("disconnected")
+        def handle_disconnect():
+            print("Disconnected.")
+
+            if self.logged_on_once:
+                print("Reconnecting...")
+                worker.reconnect(maxdelay=30)
+
+        @worker.on("reconnect")
+        def handle_reconnect(delay):
+            print("Reconnect in %ds...", delay)
+
+    def close(self):
+        if self.steam.logged_on:
+            self.logged_on_once = False
+            print("Logout")
+            self.steam.logout()
+        if self.steam.connected:
+            self.steam.disconnect()
 
 
 class GameClient(discord.Client):
@@ -141,11 +196,22 @@ class GameClient(discord.Client):
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
-        steam_api_key = os.getenv("GAME_BOT_STEAM")
+        steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
             self.steamapi = WebAPI(
                 key=steam_api_key
             )
+        else:
+            self.steamapi = None
+        steam_username = os.getenv("GAME_BOT_STEAM_USER")
+        steam_password = os.getenv("GAME_BOT_STEAM_PASS")
+        if steam_username and steam_password:
+            self.steamclient = SteamWorker()
+            self.steamclient.steam.cli_login(steam_username, steam_password)
+            self.dotaclient = Dota2Client(self.steamclient.steam)
+        else:
+            self.steamclient = None
+            self.dotaclient = None
 
     async def setup_hook(self) -> None:
         """
@@ -352,80 +418,121 @@ class Match:
 
 
 DOTA_RANKS = {
-    0: "Unknown",
+    0: ("Unknown", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310"),
 
-    10: "Herald",
-    11: "Herald [1]",
-    12: "Herald [2]",
-    13: "Herald [3]",
-    14: "Herald [4]",
-    15: "Herald [5]",
-    16: "Herald [6]",
-    17: "Herald [7]",
+    10: ("Herald", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/Emoticon_Ranked_Herald.png/revision/latest?cb=20190212051846"),
+    11: ("Herald [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/85/SeasonalRank1-1.png/revision/latest?cb=20190130002445"),
+    12: ("Herald [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/ee/SeasonalRank1-2.png/revision/latest?cb=20190130002448"),
+    13: ("Herald [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/0/05/SeasonalRank1-3.png/revision/latest?cb=20190130002457"),
+    14: ("Herald [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/SeasonalRank1-4.png/revision/latest?cb=20190130002500"),
+    15: ("Herald [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2b/SeasonalRank1-5.png/revision/latest?cb=20190130002504"),
+    16: ("Herald [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/94/SeasonalRank1-6.png/revision/latest?cb=20190130002437"),
+    17: ("Herald [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/12/SeasonalRank1-7.png/revision/latest?cb=20190130002441"),
 
-    20: "Guardian",
-    21: "Guardian [1]",
-    22: "Guardian [2]",
-    23: "Guardian [3]",
-    24: "Guardian [4]",
-    25: "Guardian [5]",
-    26: "Guardian [6]",
-    27: "Guardian [7]",
+    20: ("Guardian", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/43/Emoticon_Ranked_Guardian.png/revision/latest?cb=20190212051853"),
+    21: ("Guardian [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank2-1.png/revision/latest?cb=20190130002542"),
+    22: ("Guardian [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2c/SeasonalRank2-2.png/revision/latest?cb=20190130002545"),
+    23: ("Guardian [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f5/SeasonalRank2-3.png/revision/latest?cb=20190130002548"),
+    24: ("Guardian [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b4/SeasonalRank2-4.png/revision/latest?cb=20190130002552"),
+    25: ("Guardian [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/32/SeasonalRank2-5.png/revision/latest?cb=20190130002555"),
+    26: ("Guardian [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/72/SeasonalRank2-6.png/revision/latest?cb=20190130002558"),
+    27: ("Guardian [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c6/SeasonalRank2-7.png/revision/latest?cb=20190130002601"),
 
-    30: "Crusader",
-    31: "Crusader [1]",
-    32: "Crusader [2]",
-    33: "Crusader [3]",
-    34: "Crusader [4]",
-    35: "Crusader [5]",
-    36: "Crusader [6]",
-    37: "Crusader [7]",
+    30: ("Crusader", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2d/Emoticon_Ranked_Crusader.png/revision/latest?cb=20190212051912"),
+    31: ("Crusader [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/82/SeasonalRank3-1.png/revision/latest?cb=20190130002626"),
+    32: ("Crusader [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6e/SeasonalRank3-2.png/revision/latest?cb=20190130002629"),
+    33: ("Crusader [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/67/SeasonalRank3-3.png/revision/latest?cb=20190130002632"),
+    34: ("Crusader [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank3-4.png/revision/latest?cb=20190130002635"),
+    35: ("Crusader [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b1/SeasonalRank3-5.png/revision/latest?cb=20190130002639"),
+    36: ("Crusader [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611"),
+    37: ("Crusader [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611"),
 
-    40: "Archon",
-    41: "Archon [1]",
-    42: "Archon [2]",
-    43: "Archon [3]",
-    44: "Archon [4]",
-    45: "Archon [5]",
-    46: "Archon [6]",
-    47: "Archon [7]",
+    40: ("Archon", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/Emoticon_Ranked_Archon.png/revision/latest?cb=20190130004535"),
+    41: ("Archon [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/76/SeasonalRank4-1.png/revision/latest?cb=20190130002704"),
+    42: ("Archon [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank4-2.png/revision/latest?cb=20190130002707"),
+    43: ("Archon [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/60/SeasonalRank4-3.png/revision/latest?cb=20190130002710"),
+    44: ("Archon [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/4a/SeasonalRank4-4.png/revision/latest?cb=20190130002714"),
+    45: ("Archon [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a3/SeasonalRank4-5.png/revision/latest?cb=20190130002718"),
+    46: ("Archon [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/7e/SeasonalRank4-6.png/revision/latest?cb=20190130002651"),
+    47: ("Archon [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/95/SeasonalRank4-7.png/revision/latest?cb=20190130002654"),
 
-    50: "Legend",
-    51: "Legend [1]",
-    52: "Legend [2]",
-    53: "Legend [3]",
-    54: "Legend [4]",
-    55: "Legend [5]",
-    56: "Legend [6]",
-    57: "Legend [7]",
+    50: ("Legend", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/18/Emoticon_Ranked_Legend.png/revision/latest?cb=20190212051924"),
+    51: ("Legend [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/79/SeasonalRank5-1.png/revision/latest?cb=20190130002757"),
+    52: ("Legend [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/5/52/SeasonalRank5-2.png/revision/latest?cb=20190130002839"),
+    53: ("Legend [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/88/SeasonalRank5-3.png/revision/latest?cb=20190130002819"),
+    54: ("Legend [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/25/SeasonalRank5-4.png/revision/latest?cb=20190130002822"),
+    55: ("Legend [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRank5-5.png/revision/latest?cb=20190130002826"),
+    56: ("Legend [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2f/SeasonalRank5-6.png/revision/latest?cb=20190130002742"),
+    57: ("Legend [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank5-7.png/revision/latest?cb=20190130002745"),
 
-    60: "Ancient",
-    61: "Ancient [1]",
-    62: "Ancient [2]",
-    63: "Ancient [3]",
-    64: "Ancient [4]",
-    65: "Ancient [5]",
-    66: "Ancient [6]",
-    67: "Ancient [7]",
+    60: ("Ancient", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/d8/Emoticon_Ranked_Ancient.png/revision/latest?cb=20190216113137"),
+    61: ("Ancient [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e0/SeasonalRank6-1.png/revision/latest?cb=20190130002941"),
+    62: ("Ancient [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/1c/SeasonalRank6-2.png/revision/latest?cb=20190130002945"),
+    63: ("Ancient [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/da/SeasonalRank6-3.png/revision/latest?cb=20190130002948"),
+    64: ("Ancient [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/db/SeasonalRank6-4.png/revision/latest?cb=20190130002951"),
+    65: ("Ancient [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/47/SeasonalRank6-5.png/revision/latest?cb=20190130002955"),
+    66: ("Ancient [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/bd/SeasonalRank6-6.png/revision/latest?cb=20190130002958"),
+    67: ("Ancient [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b8/SeasonalRank6-7.png/revision/latest?cb=20190130003003"),
 
-    70: "Divine",
-    71: "Divine [1]",
-    72: "Divine [2]",
-    73: "Divine [3]",
-    74: "Divine [4]",
-    75: "Divine [5]",
-    76: "Divine [6]",
-    77: "Divine [7]",
+    70: ("Divine", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/Emoticon_Ranked_Divine.png/revision/latest?cb=20190130004646"),
+    71: ("Divine [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b7/SeasonalRank7-1.png/revision/latest?cb=20190130003022"),
+    72: ("Divine [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8f/SeasonalRank7-2.png/revision/latest?cb=20190130003026"),
+    73: ("Divine [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/fd/SeasonalRank7-3.png/revision/latest?cb=20190130003029"),
+    74: ("Divine [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/SeasonalRank7-4.png/revision/latest?cb=20190130003033"),
+    75: ("Divine [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank7-5.png/revision/latest?cb=20190130003041"),
+    76: ("Divine [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a1/SeasonalRank7-6.png/revision/latest?cb=20190130003039"),
+    77: ("Divine [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c1/SeasonalRank7-7.png/revision/latest?cb=20190130003043"),
 
-    80: "Immortal",
-    81: "Immortal",
-    82: "Immortal",
-    83: "Immortal",
-    84: "Immortal",
+    80: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f2/SeasonalRankTop0.png/revision/latest?cb=20180606220529"),
+    81: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/df/SeasonalRankTop1.png/revision/latest?cb=20180606220541"),
+    82: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/ad/SeasonalRankTop2.png/revision/latest?cb=20180606220545"),
+    83: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRankTop3.png/revision/latest?cb=20180606220548"),
+    84: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/46/SeasonalRankTop4.png/revision/latest?cb=20180606220552"),
 }
+
+DOTA_STATE = {
+    0: "Confirming match",
+    1: "Waiting for loaders",
+    2: "Hero Selection",
+    3: "Strategy Time",
+    4: "Pre Game",
+    5: "Playing",
+    6: "Post Game",
+    7: "Disconnecting",
+    8: "Team Showcase",
+    9: "Custom Game Setup",
+    10: "Waiting for game to load",
+    11: "Scenario Setup",
+}
+
+DOTA_ADV_LABELS = {
+    "xp_per_min": "XP",
+    "net_worth": "Net Worth",
+    "last_hits": "Last Hits",
+    "denies": "Denies",
+    "hero_damage": "Hero Damage",
+    "tower_damage": "Tower Damage",
+    "hero_healing": "Healing"
+}
+
+DOTA_EXPECTED_BUILDINGS = [
+    {
+        0: [1, 2, 3],
+        1: [1, 1]
+    },
+    {
+        0: [1, 2, 3, 4],
+        1: [1, 1]
+    },
+    {
+        0: [1, 2, 3],
+        1: [1, 1]
+    }
+]
 
 
 class DotaMatch(Match):
+    known_matches: set[int]
     steam_id: int
     party_size: int
     timestamp: int
@@ -448,14 +555,122 @@ class DotaMatch(Match):
     def close_match(self):
         self.task.cancel(msg="Closing match")
 
-    def get_poll_interval(self):
+    def get_poll_interval(self) -> int | float:
         if self.polls < MATCH_POLL_INTERVAL_COUNT:
             return MATCH_POLL_INTERVALS[self.polls]
         else:
             return MATCH_POLL_INTERVAL_LAST
 
+    @staticmethod
+    def get_duration(time: int) -> str:
+        minutes, seconds = divmod(time, 60)
+        return f"{minutes}:{seconds:02}"
+
+    @staticmethod
+    def get_type(match: dict[str, Any]) -> str:
+        # match type
+        resources = await DotaAPI.get_constants("lobby_type", "game_mode")
+        lobby_type = DotaAPI.query_match_constant(resources, match, "lobby_type")
+        game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
+        return f"{lobby_type} {game_mode}"
+
+    def query_realtime(self, channel: discord.TextChannel):
+        # request spectate for steam server ID
+        jobid = client.dotaclient.send_job(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
+            "steam_id": self.steam_id,
+            "live": False
+        })
+
+        def handle_resp(message):
+            live_result = message.watch_live_result
+            if live_result == 0:
+                resp = client.steamapi.IDota2MatchStats_570.GetRealtimeStats(server_steam_id=message.server_steamid)
+                match = resp["match"]
+                teams = resp["teams"]
+                team_id = 0
+                for team in teams:
+                    for player in team["players"]:
+                        if player["accountid"] == self.steam_id:
+                            team_id = team["team_number"]
+                net_worth_adv = teams[team_id]["net_worth"] - teams[(team_id + 1) % 2]["net_worth"]
+                buildings = resp["buildings"]
+                # team -> lane[] -> type{} -> tier{}
+                destroyed_buildings = {
+                    2: deepcopy(DOTA_EXPECTED_BUILDINGS),
+                    3: deepcopy(DOTA_EXPECTED_BUILDINGS)
+                }
+                for building in buildings:
+                    team = building["team"]
+                    if team == 0:
+                        continue
+                    lane = building["lane"]
+                    if lane == 0:
+                        continue
+                    btype = building["type"]
+                    if btype == 0:
+                        continue
+                    destroyed = building["destroyed"]
+                    if destroyed:
+                        continue
+                    destroyed_buildings[team][lane][btype].remove(building["tier"])
+                highest_towers = {2: 0, 3: 0}
+                rax_count = {2: 0, 3: 0}
+                for team, lanes in destroyed_buildings.items():
+                    for lane in range(1, 4):
+                        btypes = lanes[lane]
+                        # get lowest tower destroyed
+                        tower = btypes[0][0] - 1
+                        if highest_towers[team] < tower:
+                            highest_towers[team] = tower
+                        rax = 2 - len(btypes[1])
+                        rax_count[team] += rax
+                # match type
+                match_type = DotaMatch.get_type(match)
+                # match ID
+                match_id = match["match_id"]
+                # match time
+                match_time = generate_datetime(match["start_time"])
+                # game state
+                state = match["game_state"]
+                state_name = DOTA_STATE.get(state, "Unknown")
+                # get the full lobby time if the game isn't in progress yet
+                if state == 5:
+                    duration = DotaMatch.get_duration(match["game_time"])
+                else:
+                    duration = DotaMatch.get_duration(match["timestamp"])
+                embed = discord.Embed(
+                    colour=discord.Colour.blue(),
+                    title=f"Match {match_id}",
+                    timestamp=match_time,
+                )
+                embed.add_field(name="Type", value=match_type, inline=False)
+                embed.add_field(name="State", value=state_name, inline=False)
+                embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant")
+                radiant_score = teams[0]["score"]
+                dire_score = teams[1]["score"]
+                embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+                embed.add_field(name="Net Worth", value=net_worth_adv)
+                if highest_towers[2]:
+                    embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
+                else:
+                    embed.add_field(name="Radiant Towers", value=f"No towers destroyed")
+                if highest_towers[3]:
+                    embed.add_field(name="Dire Towers", value=f"Tier {highest_towers[3]} destroyed")
+                else:
+                    embed.add_field(name="Dire Towers", value=f"No towers destroyed")
+                embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
+                embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
+                embed.set_footer(text=f"Game Time: {duration}")
+                msg_task = create_task(channel.send(embed=embed))
+            elif live_result == 4:
+                msg_task = create_task(channel.send("No match found."))
+            else:
+                msg_task = create_task(channel.send("Failed to get realtime match data."))
+
+        client.dotaclient.once(jobid, handle_resp)
+
     async def get_recent_match(self) -> dict[str, Any] | None:
-        matches: list[dict[str, Any]] = await OpenDotaAPI.get_matches(
+        matches: list[dict[str, Any]] = await DotaAPI.get_matches(
             self.steam_id,
             limit=1,
             date=1,
@@ -463,6 +678,11 @@ class DotaMatch(Match):
         )
         if matches:
             match = matches[0]
+            # we've seen this match before
+            match_id = match["match_id"]
+            if match_id in DotaMatch.known_matches:
+                return None
+            DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
             if match["party_size"] < self.party_size:
                 return None
@@ -484,38 +704,65 @@ class DotaMatch(Match):
             self.start_check()
         else:
             is_dire = match["player_slot"] > 127
+            team_num = 1 if is_dire else 0
             won = match["radiant_win"] ^ is_dire
 
             # match ID
             match_id = match["match_id"]
 
+            match_details = DotaAPI.get_match(match_id)
+
+            # match time
+            match_time = generate_datetime(match["start_time"])
+
             # create embed
             embed = discord.Embed(
                 colour=discord.Colour.green() if won else discord.Colour.red(),
                 title=f"Match {match_id}",
-                url=f"https://www.dotabuff.com/matches/{match_id}"
+                url=f"https://www.dotabuff.com/matches/{match_id}",
+                timestamp=match_time,
             )
 
-            # win or loss
-            embed.add_field(name="Status", value="Win" if won else "Loss")
+            # match type
+            embed.add_field(name="Type", value=DotaMatch.get_type(match), inline=False)
 
             # team
-            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant")
+            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant", inline=False)
 
-            # match type
-            resources = await OpenDotaAPI.get_constants("lobby_type", "game_mode")
-            lobby_type = OpenDotaAPI.query_match_constant(resources, match, "lobby_type")
-            game_mode = OpenDotaAPI.query_match_constant(resources, match, "game_mode")
-            embed.add_field(name="Type", value=f"{lobby_type} {game_mode}")
+            # score
+            radiant_score = match_details["radiant_score"]
+            dire_score = match_details["dire_score"]
+            embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
 
-            # timestamp
-            embed.add_field(name="Time", value=print_timestamp(match["start_time"]))
+            adv_map = {
+                "xp_per_min": 0,
+                "net_worth": 0,
+                "hero_damage": 0,
+                "tower_damage": 0,
+                "hero_healing": 0,
+                "last_hits": 0,
+                "denies": 0,
+            }
+            for player in match_details["players"]:
+                player_team = player["team_number"]
+                for key in adv_map.keys():
+                    if player_team == team_num:
+                        adv_map[key] += player[key]
+                    else:
+                        adv_map[key] -= player[key]
+
+            adv_map["xp_per_min"] *= match["duration"] / 60.0
+
+            for k, v in adv_map.items():
+                label = DOTA_ADV_LABELS[k]
+                embed.add_field(name=label, value=v)
+
             # rank
-            embed.add_field(name="Rank", value=DOTA_RANKS.get(match["average_rank"]) or "Unknown")
+            rank, rank_icon = DOTA_RANKS.get(match["average_rank"])
+            embed.set_author(name=rank, icon_url=rank_icon)
 
             # duration
-            minutes, seconds = divmod(match["duration"], 60)
-            embed.add_field(name="Duration", value=f"{minutes}:{seconds:02}")
+            embed.set_footer(text=f"Duration: {DotaMatch.get_duration(match['duration'])}")
 
             # send
             await self.channel.send(embed=embed)
@@ -796,7 +1043,7 @@ class Game:
                 # start the game up again
                 client.now = utcnow()
                 self.reset()
-                create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
+                check_task = create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
             no_gamers = update_value(increment, "no_gamers", 0)
@@ -1204,6 +1451,13 @@ async def consume_args(
         if control == "if":
             options.bucket = get_int(args.pop(0), BUCKET_MIN)
             return options
+    else:
+        if control == "status":
+            if client.current_match:
+                client.current_match.query_realtime(channel)
+            else:
+                await channel.send("No match found.")
+            return None
 
     # if we didn't find the control, just ignore
     return options
@@ -1260,6 +1514,9 @@ async def main():
         # start the client
         async with client as _client:
             await _client.start(os.environ["GAME_BOT_TOKEN"])
+
+    client.dotaclient.exit()
+    client.steamclient.close()
 
 
 if os.name == "nt":
