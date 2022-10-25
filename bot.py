@@ -153,6 +153,8 @@ class SteamWorker:
             print("Last logoff:", worker.user.last_logoff)
             print("-"*30)
 
+            client.dotaclient.launch()
+
         @worker.on("disconnected")
         def handle_disconnect():
             print("Disconnected.")
@@ -542,7 +544,7 @@ DOTA_CACHED_CONSTANTS = {
 
 
 class DotaMatch(Match):
-    known_matches: set[int]
+    known_matches: set[int] = {}
     steam_id: int
     party_size: int
     timestamp: int
