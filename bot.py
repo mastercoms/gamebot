@@ -131,11 +131,11 @@ class SteamWorker:
 
         @worker.on("error")
         def handle_error(result):
-            print("Logon result: %s", repr(result))
+            print("Logon result:", repr(result))
 
         @worker.on("connected")
         def handle_connected():
-            print("Connected to %s", worker.current_server_addr)
+            print("Connected to", worker.current_server_addr)
 
         @worker.on("channel_secured")
         def send_login():
@@ -147,10 +147,10 @@ class SteamWorker:
             self.logged_on_once = True
 
             print("-"*30)
-            print("Logged on as: %s", worker.user.name)
-            print("Community profile: %s", worker.steam_id.community_url)
-            print("Last logon: %s", worker.user.last_logon)
-            print("Last logoff: %s", worker.user.last_logoff)
+            print("Logged on as:", worker.user.name)
+            print("Community profile:", worker.steam_id.community_url)
+            print("Last logon:", worker.user.last_logon)
+            print("Last logoff:", worker.user.last_logoff)
             print("-"*30)
 
         @worker.on("disconnected")
@@ -163,7 +163,7 @@ class SteamWorker:
 
         @worker.on("reconnect")
         def handle_reconnect(delay):
-            print("Reconnect in %ds...", delay)
+            print(f"Reconnect in {delay}...", )
 
     def close(self):
         if self.steam.logged_on:
