@@ -590,9 +590,11 @@ class DotaMatch(Match):
             "steam_id": self.steam_id,
             "live": False
         })
+        print(f"Queried for {self.steam_id} with job", jobid)
 
         def handle_resp(message):
             live_result = message.watch_live_result
+            print("Got live result", live_result)
             if live_result == 0:
                 resp = client.steamapi.IDota2MatchStats_570.GetRealtimeStats(server_steam_id=message.server_steamid)
                 match = resp["match"]
