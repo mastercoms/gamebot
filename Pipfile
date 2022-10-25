@@ -16,7 +16,7 @@ tinydb = "*"
 thefuzz = {extras = ["speedup"], version = "*"}
 betterjsonstorage = "*"
 pytz = "*"
-steam = "*"
+steam = {extras = ["client"], version = "*"}
 httpx = {extras = ["http2"], version = "*"}
 async-lru = "*"
 dota2 = "*"
