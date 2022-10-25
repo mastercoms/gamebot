@@ -234,7 +234,8 @@ class GameClient(discord.Client):
             def launch_dota():
                 print("Launching Dota")
                 self.dotaclient.launch()
-                gevent.idle()
+                while not self.dotaclient.ready:
+                    gevent.idle()
             if self.steamclient.logged_on_once:
                 print("Logged in already")
                 launch_dota()
@@ -619,7 +620,10 @@ class DotaMatch(Match):
         })
         print(f"Queried for {self.steam_id} with msg")
 
+        got_msg = True
+
         def handle_resp(message):
+            got_msg = False
             live_result = message.watch_live_result
             print("Got live result", live_result)
             if live_result == 0:
@@ -707,7 +711,8 @@ class DotaMatch(Match):
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGame, handle_resp)
-        gevent.idle()
+        while not got_msg:
+            gevent.idle()
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
