@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import gevent.monkey
-gevent.monkey.patch_all()
-
 import asyncio
 import dataclasses
 import logging
@@ -20,6 +17,7 @@ import arrow
 import dateparser
 import datetime
 import discord
+import gevent
 import httpx
 import orjson
 
@@ -236,6 +234,7 @@ class GameClient(discord.Client):
             def launch_dota():
                 print("Launching Dota")
                 self.dotaclient.launch()
+                gevent.sleep(0)
             if self.steamclient.logged_on_once:
                 print("Logged in already")
                 launch_dota()
