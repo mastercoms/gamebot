@@ -153,9 +153,6 @@ class SteamWorker:
             print("Last logoff:", worker.user.last_logoff)
             print("-"*30)
 
-            client.dotaclient = Dota2Client(self.steam)
-            client.dotaclient.launch()
-
         @worker.on("disconnected")
         def handle_disconnect():
             print("Disconnected.")
@@ -225,8 +222,9 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
-            self.dotaclient = None
             self.steamclient.login(steam_username, steam_password)
+            self.dotaclient = Dota2Client(self.steamclient.steam)
+            self.steamclient.steam.once("logged_on", self.dotaclient.launch)
         else:
             self.steamclient = None
             self.dotaclient = None
