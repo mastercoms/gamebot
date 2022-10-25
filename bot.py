@@ -241,7 +241,7 @@ class GameClient(discord.Client):
             self.steamclient.login(steam_username, steam_password)
             self.dotaclient = Dota2Client(self.steamclient.steam)
             #self.dotaclient.verbose_debug = True
-            self.dotaclient._LOG.setLevel(logging.DEBUG)
+            #self.dotaclient._LOG.setLevel(logging.DEBUG)
             def launch_dota():
                 print("Launching Dota")
                 self.dotaclient.launch()
