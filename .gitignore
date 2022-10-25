@@ -1,3 +1,5 @@
 /.idea/
 /db.json
 /settings.json
+/*.bin
+/cm_servers.json

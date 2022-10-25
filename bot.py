@@ -32,7 +32,7 @@ from discord import Intents, AllowedMentions
 from pytz import timezone
 from steam.core import connection
 from steam.core.cm import CMClient
-from steam.steamid import SteamID, from_invite_code
+from steam.steamid import SteamID, from_invite_code, make_steam64
 from steam.webapi import WebAPI
 from steam.client import SteamClient
 from dota2.client import Dota2Client
@@ -131,7 +131,7 @@ class DotaAPI:
 
     @staticmethod
     def get_match(match_id: int) -> dict[str, Any]:
-        return client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=match_id)["result"]
+        return client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))["result"]
 
 
 class SteamWorker:
@@ -226,8 +226,50 @@ class GameClient(discord.Client):
         steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
             self.steamapi = WebAPI(
-                key=steam_api_key
+                key=steam_api_key,
+                auto_load_interfaces=False
             )
+            steam_interfaces = self.steamapi.fetch_interfaces()
+            dota_interfaces = [
+                {
+                    "name": "IDOTA2Match_570",
+                    "methods": [
+                        {
+                            "name": "GetMatchDetails",
+                            "version": 1,
+                            "httpmethod": "GET",
+                            "parameters": [
+                                {
+                                    "name": "match_id",
+                                    "type": "string",
+                                    "optional": False,
+                                    "description": "Match id"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "name": "IDota2MatchStats_570",
+                    "methods": [
+                        {
+                            "name": "GetRealtimeStats",
+                            "version": 1,
+                            "httpmethod": "GET",
+                            "parameters": [
+                                {
+                                    "name": "server_steam_id",
+                                    "type": "string",
+                                    "optional": False,
+                                    "description": "Live server"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+            steam_interfaces["apilist"]["interfaces"].extend(dota_interfaces)
+            self.steamapi.load_interfaces(steam_interfaces)
         else:
             self.steamapi = None
         steam_username = os.getenv("GAME_BOT_STEAM_USER")
@@ -243,10 +285,8 @@ class GameClient(discord.Client):
             #self.dotaclient.verbose_debug = True
             #self.dotaclient._LOG.setLevel(logging.DEBUG)
             def launch_dota():
-                print("Launching Dota")
                 self.dotaclient.launch()
             if self.steamclient.logged_on_once:
-                print("Logged in already")
                 launch_dota()
             else:
                 self.steamclient.steam.once("logged_on", launch_dota)
@@ -560,11 +600,14 @@ DOTA_ADV_LABELS = {
 
 DOTA_EXPECTED_BUILDINGS = [
     {
+        2: [0]
+    },
+    {
         0: [1, 2, 3],
         1: [1, 1]
     },
     {
-        0: [1, 2, 3, 4],
+        0: [1, 2, 3, 4, 4],
         1: [1, 1]
     },
     {
@@ -573,9 +616,7 @@ DOTA_EXPECTED_BUILDINGS = [
     }
 ]
 
-DOTA_CACHED_CONSTANTS = {
-
-}
+DOTA_CACHED_CONSTANTS = {}
 
 
 class DotaMatch(Match):
@@ -623,33 +664,26 @@ class DotaMatch(Match):
 
     def query_realtime(self, channel: discord.TextChannel):
         # request spectate for steam server ID
-        jobid = client.dotaclient.request_profile_card(self.steam_id)
-        def test1(account_id, profile_card):
-            print(account_id, profile_card)
-        def test2(message):
-            print(message)
-        client.dotaclient.once(jobid, test2)
-        client.dotaclient.once("profile_card", test1)
-        if True:
-            return
-        jobid = client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": self.steam_id,
-            "live": False
+        client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
+            "steam_id": make_steam64(self.steam_id)
         })
-        print(f"Queried for {self.steam_id} with msg")
 
         def handle_resp(message):
             live_result = message.watch_live_result
             print("Got live result", live_result)
             if live_result == 0:
-                resp = client.steamapi.IDota2MatchStats_570.GetRealtimeStats(server_steam_id=message.server_steamid)
+                try:
+                    resp = client.steamapi.IDota2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
+                except:
+                    msg_task = create_task(channel.send("No live match found."))
+                    return
                 match = resp["match"]
                 teams = resp["teams"]
                 team_id = 0
                 for team in teams:
                     for player in team["players"]:
                         if player["accountid"] == self.steam_id:
-                            team_id = team["team_number"]
+                            team_id = team["team_id"]
                 net_worth_adv = teams[team_id]["net_worth"] - teams[(team_id + 1) % 2]["net_worth"]
                 buildings = resp["buildings"]
                 # team -> lane[] -> type{} -> tier{}
@@ -665,7 +699,8 @@ class DotaMatch(Match):
                     if lane == 0:
                         continue
                     btype = building["type"]
-                    if btype == 0:
+                    # ancient
+                    if btype == 2:
                         continue
                     destroyed = building["destroyed"]
                     if destroyed:
@@ -677,25 +712,27 @@ class DotaMatch(Match):
                     for lane in range(1, 4):
                         btypes = lanes[lane]
                         # get lowest tower destroyed
-                        tower = btypes[0][0] - 1
+                        tower = btypes[0][-1] if len(btypes[0]) else 0
                         if highest_towers[team] < tower:
                             highest_towers[team] = tower
-                        rax = 2 - len(btypes[1])
+                        rax = len(btypes[1])
                         rax_count[team] += rax
                 # match type
                 match_type = DotaMatch.get_type(match)
                 # match ID
                 match_id = match["match_id"]
                 # match time
-                match_time = generate_datetime(match["start_time"])
+                match_time = generate_datetime(match["start_timestamp"])
                 # game state
                 state = match["game_state"]
                 state_name = DOTA_STATE.get(state, "Unknown")
                 # get the full lobby time if the game isn't in progress yet
                 if state == 5:
                     duration = DotaMatch.get_duration(match["game_time"])
+                    duration_title = "Game Time"
                 else:
                     duration = DotaMatch.get_duration(match["timestamp"])
+                    duration_title = "Pre-Game Time"
                 embed = discord.Embed(
                     colour=discord.Colour.blue(),
                     title=f"Match {match_id}",
@@ -718,12 +755,12 @@ class DotaMatch(Match):
                     embed.add_field(name="Dire Towers", value=f"No towers destroyed")
                 embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
                 embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
-                embed.set_footer(text=f"Game Time: {duration}")
+                embed.set_footer(text=f"{duration_title}: {duration}")
                 msg_task = create_task(channel.send(embed=embed))
             elif live_result == 4:
-                msg_task = create_task(channel.send("No match found."))
+                msg_task = create_task(channel.send("No live match found."))
             else:
-                msg_task = create_task(channel.send("Failed to get realtime match data."))
+                msg_task = create_task(channel.send("Failed to get live match data."))
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
 
@@ -1512,7 +1549,7 @@ async def consume_args(
             if client.current_match:
                 client.current_match.query_realtime(channel)
             else:
-                await channel.send("No match found.")
+                await channel.send("No live match found.")
             return None
 
     # if we didn't find the control, just ignore
