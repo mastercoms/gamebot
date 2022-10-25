@@ -131,6 +131,7 @@ class SteamWorker:
         self.logged_on_once = False
 
         self.steam = worker = SteamClient()
+        self.steam.verbose_debug = True
         worker.set_credential_location(".")
 
         @worker.on("error")
@@ -227,6 +228,7 @@ class GameClient(discord.Client):
             SteamClient._LOG.setLevel(logging.DEBUG)
             self.steamclient.login(steam_username, steam_password)
             self.dotaclient = Dota2Client(self.steamclient.steam)
+            self.dotaclient.verbose_debug = True
             self.dotaclient._LOG.setLevel(logging.DEBUG)
             self.steamclient.steam.once("logged_on", self.dotaclient.launch)
         else:
