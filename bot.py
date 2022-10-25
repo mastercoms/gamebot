@@ -708,6 +708,7 @@ class DotaMatch(Match):
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
         client.dotaclient.once(jobid, handle_resp)
+        gevent.sleep(0)
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
