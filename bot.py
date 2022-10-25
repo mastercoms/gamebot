@@ -620,10 +620,10 @@ class DotaMatch(Match):
         })
         print(f"Queried for {self.steam_id} with msg")
 
-        got_msg = True
+        wait_msg = [True]
 
         def handle_resp(message):
-            got_msg = False
+            wait_msg[0] = False
             live_result = message.watch_live_result
             print("Got live result", live_result)
             if live_result == 0:
@@ -711,7 +711,7 @@ class DotaMatch(Match):
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGame, handle_resp)
-        while not got_msg:
+        while wait_msg[0]:
             gevent.idle()
 
     async def get_recent_match(self) -> dict[str, Any] | None:
