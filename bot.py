@@ -604,6 +604,7 @@ class DotaMatch(Match):
             "steam_id": self.steam_id,
             "live": False
         })
+        jobid = client.dotaclient.request_profile_card(self.steam_id)
         print(f"Queried for {self.steam_id} with msg")
 
         def handle_resp(message):
