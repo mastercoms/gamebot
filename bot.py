@@ -556,7 +556,7 @@ DOTA_CACHED_CONSTANTS = {
 
 
 class DotaMatch(Match):
-    known_matches: set[int] = {}
+    known_matches: set[int] = set()
     steam_id: int
     party_size: int
     timestamp: int
