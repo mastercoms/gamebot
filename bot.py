@@ -1040,7 +1040,7 @@ class Game:
         """
         gamers = self.get_gamers()
         num_gamers = len(gamers)
-        if num_gamers > 1:
+        if num_gamers >= GAME_DATA[self.game_name].get("min", BUCKET_MIN):
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
@@ -1457,17 +1457,14 @@ async def consume_args(
             option_mode = args.pop(0)
             option = args.pop(0)
             if option_mode == "set":
-                new_value = args.pop(0)
+                new_value = args.pop(0) if len(args) else None
                 if "id" in option:
                     tmp = new_value
                     new_value = get_int(new_value, default=None)
                     if new_value is None:
                         new_value = tmp
 
-                def set_new_value(old):
-                    return new_value
-
-                new_value = update_value(set_new_value, option, client.settings_table)
+                set_value(option, new_value, client.settings_table)
                 await channel.send(f"{option}={new_value}")
             else:
                 await channel.send(f"{option}={get_value(option, client.settings_table)}")
