@@ -8,6 +8,7 @@ import os
 import pathlib
 import socket
 
+
 from copy import deepcopy
 from typing import Any, Callable
 
@@ -23,6 +24,8 @@ from async_lru import alru_cache
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from pytz import timezone
+from steam.core import connection
+from steam.core.cm import CMClient
 from steam.steamid import SteamID, from_invite_code
 from steam.webapi import WebAPI
 from steam.client import SteamClient
@@ -44,7 +47,6 @@ else:
 
     uvloop.install()
 
-logging.basicConfig(format='[%(asctime)s] %(levelname)s %(name)s: %(message)s', level=logging.DEBUG)
 
 def create_task(coro, *, name=None):
     task = asyncio.create_task(coro, name=name)
@@ -220,8 +222,12 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
+            CMClient._LOG.setLevel(logging.DEBUG)
+            connection.logger.setLevel(logging.DEBUG)
+            SteamClient._LOG.setLevel(logging.DEBUG)
             self.steamclient.login(steam_username, steam_password)
             self.dotaclient = Dota2Client(self.steamclient.steam)
+            self.dotaclient._LOG.setLevel(logging.DEBUG)
             self.steamclient.steam.once("logged_on", self.dotaclient.launch)
         else:
             self.steamclient = None
