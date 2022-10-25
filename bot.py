@@ -8,12 +8,12 @@ import os
 import pathlib
 import socket
 
-
 from copy import deepcopy
 from typing import Any, Callable
 
 import aiohttp
 import arrow
+import asyncio_gevent
 import dateparser
 import datetime
 import discord
@@ -46,7 +46,9 @@ else:
     # for uvloop
     import uvloop
 
-    uvloop.install()
+    #uvloop.install()
+
+asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 
 
 def create_task(coro, *, name=None):
@@ -234,8 +236,6 @@ class GameClient(discord.Client):
             def launch_dota():
                 print("Launching Dota")
                 self.dotaclient.launch()
-                while not self.dotaclient.ready:
-                    gevent.idle()
             if self.steamclient.logged_on_once:
                 print("Logged in already")
                 launch_dota()
@@ -620,10 +620,7 @@ class DotaMatch(Match):
         })
         print(f"Queried for {self.steam_id} with msg")
 
-        wait_msg = [True]
-
         def handle_resp(message):
-            wait_msg[0] = False
             live_result = message.watch_live_result
             print("Got live result", live_result)
             if live_result == 0:
@@ -711,8 +708,6 @@ class DotaMatch(Match):
                 msg_task = create_task(channel.send("Failed to get realtime match data."))
 
         client.dotaclient.once(jobid, handle_resp)
-        while wait_msg[0]:
-            gevent.idle()
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
