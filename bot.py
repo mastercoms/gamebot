@@ -170,7 +170,7 @@ class SteamWorker:
 
     def login(self, username, password):
         path = self.steam._get_sentry_path(username)
-        if os.path.exists(path):
+        if False and os.path.exists(path):
             self.steam.login(username, password)
         else:
             self.steam.cli_login(username, password)
@@ -223,7 +223,7 @@ class GameClient(discord.Client):
             self.steamapi = None
         steam_username = os.getenv("GAME_BOT_STEAM_USER")
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
-        if steam_username and steam_password:
+        if steam_username:
             self.steamclient = SteamWorker()
             self.dotaclient = None
             self.steamclient.login(steam_username, steam_password)
