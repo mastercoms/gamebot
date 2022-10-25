@@ -22,19 +22,16 @@ import asyncio_gevent
 import dateparser
 import datetime
 import discord
-import gevent
 import httpx
 import orjson
 
-from async_lru import alru_cache
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from pytz import timezone
-from steam.core import connection
-from steam.core.cm import CMClient
 from steam.steamid import SteamID, from_invite_code, make_steam64
 from steam.webapi import WebAPI
 from steam.client import SteamClient
+from steam.client.user import SteamUser
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
 from tinydb import TinyDB, Query
@@ -177,8 +174,36 @@ class SteamWorker:
         def handle_reconnect(delay):
             print(f"Reconnect in {delay}...", )
 
-    def login(self, username, password):
-        two_factor_code = input("Enter 2FA code: ")
+        @worker.on("friend_invite")
+        def handle_friend_invite(user: SteamUser):
+            mutual = get_value("mutual_steam_id", table=client.settings_table)
+            should_add = True
+            if mutual:
+                should_add = False
+                user_steam_id = user.steam_id.as_64
+                # search for the mutual user
+                search_for = mutual
+                # first try getting the friends list of the requesting user
+                try:
+                    resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
+                except:
+                    # if it's private, try getting the friends list of the mutual target
+                    resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
+                    # search for the requesting user
+                    search_for = user_steam_id
+                friends = resp["friendslist"]["friends"]
+                for friend in friends:
+                    if friend["steamid"] == search_for:
+                        should_add = True
+                        break
+            if should_add:
+                self.steam.friends.add(user)
+
+    def login(self, username, password, no_2fa):
+        if no_2fa:
+            two_factor_code = None
+        else:
+            two_factor_code = input("Enter 2FA code: ")
         if two_factor_code or os.path.exists(self.steam._get_sentry_path(username)):
             self.steam.login(username, password, two_factor_code=two_factor_code)
         else:
@@ -205,6 +230,8 @@ class GameClient(discord.Client):
         Creates a new Discord client.
         """
         self.opendota = kwargs.pop("opendota")
+        self.debug = kwargs.pop("debug", False)
+        self.no_2fa = kwargs.pop("no_2fa", True)
 
         super().__init__(*args, **kwargs)
 
@@ -226,64 +253,20 @@ class GameClient(discord.Client):
         steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
             self.steamapi = WebAPI(
-                key=steam_api_key,
-                auto_load_interfaces=False
+                key=steam_api_key
             )
-            steam_interfaces = self.steamapi.fetch_interfaces()
-            dota_interfaces = [
-                {
-                    "name": "IDOTA2Match_570",
-                    "methods": [
-                        {
-                            "name": "GetMatchDetails",
-                            "version": 1,
-                            "httpmethod": "GET",
-                            "parameters": [
-                                {
-                                    "name": "match_id",
-                                    "type": "string",
-                                    "optional": False,
-                                    "description": "Match id"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "name": "IDota2MatchStats_570",
-                    "methods": [
-                        {
-                            "name": "GetRealtimeStats",
-                            "version": 1,
-                            "httpmethod": "GET",
-                            "parameters": [
-                                {
-                                    "name": "server_steam_id",
-                                    "type": "string",
-                                    "optional": False,
-                                    "description": "Live server"
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-            steam_interfaces["apilist"]["interfaces"].extend(dota_interfaces)
-            self.steamapi.load_interfaces(steam_interfaces)
         else:
             self.steamapi = None
         steam_username = os.getenv("GAME_BOT_STEAM_USER")
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
-            #CMClient._LOG.setLevel(logging.DEBUG)
-            #connection.logger.setLevel(logging.DEBUG)
-            #SteamClient._LOG.setLevel(logging.DEBUG)
-            #self.steamclient.steam.verbose_debug = True
-            self.steamclient.login(steam_username, steam_password)
+            if self.debug:
+                self.steamclient.steam.verbose_debug = True
+            self.steamclient.login(steam_username, steam_password, self.no_2fa)
             self.dotaclient = Dota2Client(self.steamclient.steam)
-            #self.dotaclient.verbose_debug = True
-            #self.dotaclient._LOG.setLevel(logging.DEBUG)
+            if self.debug:
+                self.dotaclient.verbose_debug = True
             def launch_dota():
                 self.dotaclient.launch()
             if self.steamclient.logged_on_once:
@@ -673,7 +656,7 @@ class DotaMatch(Match):
             print("Got live result", live_result)
             if live_result == 0:
                 try:
-                    resp = client.steamapi.IDota2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
+                    resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
                 except:
                     msg_task = create_task(channel.send("No live match found."))
                     return
@@ -1575,7 +1558,7 @@ def is_game_command(content: str) -> bool:
     return ratio > 70
 
 
-async def main():
+async def main(debug, no_2fa):
     """
     Main function for running the client.
     """
@@ -1599,6 +1582,8 @@ async def main():
         # create our client, limit messages to what we need to keep track of
         client = GameClient(
             opendota=opendota,
+            debug=debug,
+            no_2fa=no_2fa,
             max_messages=500,
             intents=intents,
             allowed_mentions=mentions,
@@ -1635,6 +1620,11 @@ with open("settings.json", "rb") as f:
     DEFAULT_GAME = GAMES[0]
 
 
-discord.utils.setup_logging()
+def start_bot(debug, no_2fa):
+    discord.utils.setup_logging(level=logging.DEBUG if debug else logging.INFO)
+    asyncio.run(main(debug, no_2fa))
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    # TODO: arg parse
+    start_bot(False, True)
