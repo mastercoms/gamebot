@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gevent.monkey
+gevent.monkey.patch_all()
+
 import asyncio
 import dataclasses
 import math
@@ -153,6 +156,7 @@ class SteamWorker:
             print("Last logoff:", worker.user.last_logoff)
             print("-"*30)
 
+            client.dotaclient = Dota2Client(self.steam)
             client.dotaclient.launch()
 
         @worker.on("disconnected")
@@ -167,7 +171,16 @@ class SteamWorker:
         def handle_reconnect(delay):
             print(f"Reconnect in {delay}...", )
 
+    def login(self, username, password):
+        path = self.steam._get_sentry_path(username)
+        if os.path.exists(path):
+            self.steam.login(username, password)
+        else:
+            self.steam.cli_login(username, password)
+
     def close(self):
+        if client.dotaclient:
+            client.dotaclient.exit()
         if self.steam.logged_on:
             self.logged_on_once = False
             print("Logout")
@@ -215,8 +228,8 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username and steam_password:
             self.steamclient = SteamWorker()
-            self.steamclient.steam.cli_login(steam_username, steam_password)
-            self.dotaclient = Dota2Client(self.steamclient.steam)
+            self.dotaclient = None
+            self.steamclient.login(steam_username, steam_password)
         else:
             self.steamclient = None
             self.dotaclient = None
@@ -1533,7 +1546,6 @@ async def main():
         async with client as _client:
             await _client.start(os.environ["GAME_BOT_TOKEN"])
 
-    client.dotaclient.exit()
     client.steamclient.close()
 
 
