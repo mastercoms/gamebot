@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import math
 import os
 import pathlib
 import socket
-from copy import deepcopy
 
+from copy import deepcopy
 from typing import Any, Callable
 
 import aiohttp
@@ -43,6 +44,7 @@ else:
 
     uvloop.install()
 
+logging.basicConfig(format='[%(asctime)s] %(levelname)s %(name)s: %(message)s', level=logging.DEBUG)
 
 def create_task(coro, *, name=None):
     task = asyncio.create_task(coro, name=name)
@@ -218,10 +220,8 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
-            self.steamclient.steam._LOG.setLevel("DEBUG")
             self.steamclient.login(steam_username, steam_password)
             self.dotaclient = Dota2Client(self.steamclient.steam)
-            self.dotaclient._LOG.setLevel("DEBUG")
             self.steamclient.steam.once("logged_on", self.dotaclient.launch)
         else:
             self.steamclient = None
