@@ -170,7 +170,7 @@ class SteamWorker:
 
     def login(self, username, password):
         path = self.steam._get_sentry_path(username)
-        if False and os.path.exists(path):
+        if os.path.exists(path):
             self.steam.login(username, password)
         else:
             self.steam.cli_login(username, password)
