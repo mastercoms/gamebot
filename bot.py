@@ -88,13 +88,19 @@ class DotaAPI:
         return resp.json()
 
     @staticmethod
-    @alru_cache
-    async def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
-        constants = {}
+    async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
+        global DOTA_CACHED_CONSTANTS
         for res in resources:
             url = f"/constants/{res}"
-            constants[res] = await DotaAPI.get(url)
-        return constants
+            DOTA_CACHED_CONSTANTS[res] = await DotaAPI.get(url)
+        return DOTA_CACHED_CONSTANTS
+
+    @staticmethod
+    def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
+        global DOTA_CACHED_CONSTANTS
+        for res in resources:
+            DOTA_CACHED_CONSTANTS[res] = DOTA_CACHED_CONSTANTS.get(res)
+        return DOTA_CACHED_CONSTANTS
 
     @staticmethod
     def query_constant_name(constants: dict[str, dict[str, Any]], resource: str, idx: int) -> str:
@@ -530,6 +536,10 @@ DOTA_EXPECTED_BUILDINGS = [
     }
 ]
 
+DOTA_CACHED_CONSTANTS = {
+
+}
+
 
 class DotaMatch(Match):
     known_matches: set[int]
@@ -569,7 +579,7 @@ class DotaMatch(Match):
     @staticmethod
     def get_type(match: dict[str, Any]) -> str:
         # match type
-        resources = await DotaAPI.get_constants("lobby_type", "game_mode")
+        resources = DotaAPI.get_constants("lobby_type", "game_mode")
         lobby_type = DotaAPI.query_match_constant(resources, match, "lobby_type")
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
@@ -1511,6 +1521,9 @@ async def main():
             intents=intents,
             allowed_mentions=mentions,
         )
+
+        # cache constants
+        await DotaAPI.query_constants("lobby_type", "game_mode")
 
         # start the client
         async with client as _client:
