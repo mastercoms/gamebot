@@ -222,8 +222,8 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
+            self.steamclient.steam._LOG.setLevel("DEBUG")
             self.steamclient.login(steam_username, steam_password)
-            self.steamclient._LOG.setLevel("DEBUG")
             self.dotaclient = Dota2Client(self.steamclient.steam)
             self.dotaclient._LOG.setLevel("DEBUG")
             self.steamclient.steam.once("logged_on", self.dotaclient.launch)
