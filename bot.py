@@ -131,7 +131,6 @@ class SteamWorker:
         self.logged_on_once = False
 
         self.steam = worker = SteamClient()
-        self.steam.verbose_debug = True
         worker.set_credential_location(".")
 
         @worker.on("error")
@@ -223,17 +222,24 @@ class GameClient(discord.Client):
         steam_password = os.getenv("GAME_BOT_STEAM_PASS")
         if steam_username:
             self.steamclient = SteamWorker()
-            CMClient._LOG.setLevel(logging.DEBUG)
-            connection.logger.setLevel(logging.DEBUG)
-            SteamClient._LOG.setLevel(logging.DEBUG)
+            #CMClient._LOG.setLevel(logging.DEBUG)
+            #connection.logger.setLevel(logging.DEBUG)
+            #SteamClient._LOG.setLevel(logging.DEBUG)
+            #self.steamclient.steam.verbose_debug = True
             self.steamclient.login(steam_username, steam_password)
             self.dotaclient = Dota2Client(self.steamclient.steam)
-            self.dotaclient.verbose_debug = True
+            #self.dotaclient.verbose_debug = True
             self.dotaclient._LOG.setLevel(logging.DEBUG)
-            if self.steamclient.logged_on_once:
-                self.steamclient.steam.once("logged_on", self.dotaclient.launch)
-            else:
+            def launch_dota():
+                print("Launching Dota")
                 self.dotaclient.launch()
+            if self.steamclient.logged_on_once:
+                print("Logged in already")
+                launch_dota()
+            else:
+                self.steamclient.steam.once("logged_on", launch_dota)
+
+
         else:
             self.steamclient = None
             self.dotaclient = None
