@@ -230,7 +230,10 @@ class GameClient(discord.Client):
             self.dotaclient = Dota2Client(self.steamclient.steam)
             self.dotaclient.verbose_debug = True
             self.dotaclient._LOG.setLevel(logging.DEBUG)
-            self.steamclient.steam.once("logged_on", self.dotaclient.launch)
+            if self.steamclient.logged_on_once:
+                self.steamclient.steam.once("logged_on", self.dotaclient.launch)
+            else:
+                self.dotaclient.launch()
         else:
             self.steamclient = None
             self.dotaclient = None
