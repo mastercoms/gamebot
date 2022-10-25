@@ -167,7 +167,7 @@ class SteamWorker:
 
     def login(self, username, password):
         path = self.steam._get_sentry_path(username)
-        if False and os.path.exists(path):
+        if os.path.exists(path):
             self.steam.login(username, password)
         else:
             self.steam.cli_login(username, password)
@@ -223,7 +223,9 @@ class GameClient(discord.Client):
         if steam_username:
             self.steamclient = SteamWorker()
             self.steamclient.login(steam_username, steam_password)
+            self.steamclient._LOG.setLevel("DEBUG")
             self.dotaclient = Dota2Client(self.steamclient.steam)
+            self.dotaclient._LOG.setLevel("DEBUG")
             self.steamclient.steam.once("logged_on", self.dotaclient.launch)
         else:
             self.steamclient = None
