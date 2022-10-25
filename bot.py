@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gevent.monkey
+gevent.monkey.patch_all()
+
 import asyncio
 import dataclasses
 import logging
