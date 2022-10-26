@@ -565,7 +565,7 @@ DOTA_STATE = {
     4: "Pre Game",
     5: "Playing",
     6: "Post Game",
-    7: "Disconnecting",
+    7: "Ended",
     8: "Team Showcase",
     9: "Custom Game Setup",
     10: "Waiting for game to load",
@@ -574,6 +574,7 @@ DOTA_STATE = {
 
 DOTA_ADV_LABELS = {
     "xp_per_min": "XP",
+    "level": "XP",
     "net_worth": "Net Worth",
     "last_hits": "Last Hits",
     "denies": "Denies",
@@ -664,20 +665,45 @@ class DotaMatch(Match):
                         resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
                         break
                     except Exception as e:
-                        print("Failed", tries)
                         if tries >= 10:
                             print("Failed to get realtime stats:", e)
-                            msg_task = create_task(channel.send("No live match found."))
+                            msg_task = create_task(channel.send("Match not started yet."))
                             return
                         gevent.sleep(2 ** tries - 1.5 + random())
                 match = resp["match"]
                 teams = resp["teams"]
                 team_id = 0
+
+                per_player_stats = {
+                    0: {
+                        "level": 0,
+                        "last_hits": 0,
+                        "denies": 0,
+                    },
+                    1: {
+                        "level": 0,
+                        "last_hits": 0,
+                        "denies": 0,
+                    }
+                }
+                level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
                 for team in teams:
+                    team_idx = team["team_id"]
+                    team_adv = per_player_stats[team_idx]
                     for player in team["players"]:
+                        for key in team_adv.keys():
+                            val = player[key]
+                            if key == "level":
+                                val = level_to_xp[val - 1]
+                            team_adv[key] += val
                         if player["accountid"] == self.steam_id:
-                            team_id = team["team_id"]
-                net_worth_adv = teams[team_id]["net_worth"] - teams[(team_id + 1) % 2]["net_worth"]
+                            team_id = team_idx
+                other_team = (team_id + 1) % 2
+                net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
+                adv_map = {"level": 0, "net_worth": net_worth_adv}
+                for key in per_player_stats[team_id].keys():
+                    adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+
                 buildings = resp["buildings"]
                 # team -> lane[] -> type{} -> tier{}
                 destroyed_buildings = {
@@ -713,15 +739,20 @@ class DotaMatch(Match):
                                 highest_towers[team] = tower
                             rax = len(btypes[1])
                             rax_count[team] += rax
+
                 # match type
                 match_type = DotaMatch.get_type(match)
+
                 # match ID
                 match_id = match["match_id"]
+
                 # match time
                 match_time = generate_datetime(match["start_timestamp"])
+
                 # game state
                 state = match["game_state"]
                 state_name = DOTA_STATE.get(state, "Unknown")
+
                 # get the full lobby time if the game isn't in progress yet
                 if state == 5:
                     duration = DotaMatch.get_duration(match["game_time"])
@@ -729,20 +760,34 @@ class DotaMatch(Match):
                 else:
                     duration = DotaMatch.get_duration(match["timestamp"])
                     duration_title = "Pre-Game Time"
+
                 embed = discord.Embed(
                     colour=discord.Colour.blue(),
                     title=f"Match {match_id}",
                     timestamp=match_time,
                 )
+
                 # force max width embed
                 #embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
+
                 embed.add_field(name="Type", value=match_type, inline=False)
+
                 embed.add_field(name="State", value=state_name, inline=False)
-                embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant")
+
                 radiant_score = teams[0]["score"]
                 dire_score = teams[1]["score"]
                 embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
-                embed.add_field(name="Net Worth", value=net_worth_adv)
+
+                embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
+
+                embed.add_field(name="Team Advantage", value="─"*25, inline=False)
+
+                for k, v in adv_map.items():
+                    label = DOTA_ADV_LABELS[k]
+                    embed.add_field(name=label, value=v)
+
+                embed.add_field(name="Building Status", value="─"*25, inline=False)
+
                 if highest_towers[2]:
                     embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
                 else:
@@ -753,7 +798,9 @@ class DotaMatch(Match):
                     embed.add_field(name="Dire Towers", value=f"No towers destroyed")
                 embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
                 embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
+
                 embed.set_footer(text=f"{duration_title}: {duration}")
+
                 msg_task = create_task(channel.send(embed=embed))
             elif live_result == 4:
                 msg_task = create_task(channel.send("No live match found."))
@@ -848,7 +895,7 @@ class DotaMatch(Match):
             adv_map["xp_per_min"] *= match["duration"] / 60.0
             adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
 
-            embed.add_field(name="Team Advantage", value="────────────"*25)
+            embed.add_field(name="Team Advantage", value="─"*25)
 
             for k, v in adv_map.items():
                 label = DOTA_ADV_LABELS[k]
@@ -1609,7 +1656,7 @@ async def main(debug, no_2fa):
         )
 
         # cache constants
-        await DotaAPI.query_constants("lobby_type", "game_mode")
+        await DotaAPI.query_constants("lobby_type", "game_mode", "xp_level")
 
         # start the client
         async with client as _client:
