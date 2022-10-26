@@ -577,7 +577,9 @@ DOTA_ADV_LABELS = {
     "level": "XP",
     "net_worth": "Net Worth",
     "last_hits": "Last Hits",
+    "lh_count": "Last Hits",
     "denies": "Denies",
+    "denies_count": "Denies",
     "hero_damage": "Hero Damage",
     "tower_damage": "Tower Damage",
     "hero_healing": "Healing"
@@ -677,13 +679,13 @@ class DotaMatch(Match):
                 per_player_stats = {
                     0: {
                         "level": 0,
-                        "last_hits": 0,
-                        "denies": 0,
+                        "lh_count": 0,
+                        "denies_count": 0,
                     },
                     1: {
                         "level": 0,
-                        "last_hits": 0,
-                        "denies": 0,
+                        "lh_count": 0,
+                        "denies_count": 0,
                     }
                 }
                 level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
