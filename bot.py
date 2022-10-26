@@ -690,7 +690,7 @@ class DotaMatch(Match):
                 }
                 level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
                 for team in teams:
-                    team_idx = team["team_id"]
+                    team_idx = team["team_number"] - 2
                     team_adv = per_player_stats[team_idx]
                     for player in team["players"]:
                         for key in team_adv.keys():
@@ -782,13 +782,13 @@ class DotaMatch(Match):
 
                 embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
 
-                embed.add_field(name="Team Advantage", value="─"*25, inline=False)
+                embed.add_field(name="Team Advantage", value="─"*23, inline=False)
 
                 for k, v in adv_map.items():
                     label = DOTA_ADV_LABELS[k]
                     embed.add_field(name=label, value=v)
 
-                embed.add_field(name="Building Status", value="─"*25, inline=False)
+                embed.add_field(name="Building Status", value="─"*23, inline=False)
 
                 if highest_towers[2]:
                     embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
@@ -807,7 +807,7 @@ class DotaMatch(Match):
             elif live_result == 4:
                 msg_task = create_task(channel.send("No live match found."))
             else:
-                msg_task = create_task(channel.send("Failed to get live match data."))
+                msg_task = create_task(channel.send(f"Failed to get live match data: error code {live_result}"))
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
 
