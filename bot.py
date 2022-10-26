@@ -14,6 +14,7 @@ import pathlib
 import socket
 
 from copy import deepcopy
+from random import random
 from typing import Any, Callable
 
 import aiohttp
@@ -653,13 +654,22 @@ class DotaMatch(Match):
 
         def handle_resp(message):
             live_result = message.watch_live_result
-            print("Got live result", live_result)
-            if live_result == 0:
-                try:
-                    resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
-                except:
-                    msg_task = create_task(channel.send("No live match found."))
-                    return
+            if live_result == 0 and message.server_steamid:
+                tries = 0
+                resp = None
+                while True:
+                    # this endpoint regularly fails, so we retry a few times
+                    tries += 1
+                    try:
+                        resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
+                        break
+                    except Exception as e:
+                        print("Failed", tries)
+                        if tries >= 10:
+                            print("Failed to get realtime stats:", e)
+                            msg_task = create_task(channel.send("No live match found."))
+                            return
+                        gevent.sleep(2 ** tries - 1.5 + random())
                 match = resp["match"]
                 teams = resp["teams"]
                 team_id = 0
@@ -674,6 +684,7 @@ class DotaMatch(Match):
                     2: deepcopy(DOTA_EXPECTED_BUILDINGS),
                     3: deepcopy(DOTA_EXPECTED_BUILDINGS)
                 }
+                buildings_populated = False
                 for building in buildings:
                     team = building["team"]
                     if team == 0:
@@ -688,18 +699,20 @@ class DotaMatch(Match):
                     destroyed = building["destroyed"]
                     if destroyed:
                         continue
+                    buildings_populated = True
                     destroyed_buildings[team][lane][btype].remove(building["tier"])
                 highest_towers = {2: 0, 3: 0}
                 rax_count = {2: 0, 3: 0}
-                for team, lanes in destroyed_buildings.items():
-                    for lane in range(1, 4):
-                        btypes = lanes[lane]
-                        # get lowest tower destroyed
-                        tower = btypes[0][-1] if len(btypes[0]) else 0
-                        if highest_towers[team] < tower:
-                            highest_towers[team] = tower
-                        rax = len(btypes[1])
-                        rax_count[team] += rax
+                if buildings_populated:
+                    for team, lanes in destroyed_buildings.items():
+                        for lane in range(1, 4):
+                            btypes = lanes[lane]
+                            # get lowest tower destroyed
+                            tower = btypes[0][-1] if len(btypes[0]) else 0
+                            if highest_towers[team] < tower:
+                                highest_towers[team] = tower
+                            rax = len(btypes[1])
+                            rax_count[team] += rax
                 # match type
                 match_type = DotaMatch.get_type(match)
                 # match ID
@@ -721,6 +734,8 @@ class DotaMatch(Match):
                     title=f"Match {match_id}",
                     timestamp=match_time,
                 )
+                # force max width embed
+                #embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
                 embed.add_field(name="Type", value=match_type, inline=False)
                 embed.add_field(name="State", value=state_name, inline=False)
                 embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant")
@@ -805,13 +820,13 @@ class DotaMatch(Match):
             # match type
             embed.add_field(name="Type", value=DotaMatch.get_type(match), inline=False)
 
-            # team
-            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant", inline=False)
-
             # score
             radiant_score = match_details["radiant_score"]
             dire_score = match_details["dire_score"]
             embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+
+            # team
+            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant", inline=False)
 
             adv_map = {
                 "xp_per_min": 0,
@@ -831,6 +846,9 @@ class DotaMatch(Match):
                         adv_map[key] -= player[key]
 
             adv_map["xp_per_min"] *= match["duration"] / 60.0
+            adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
+
+            embed.add_field(name="Team Advantage", value="────────────"*25)
 
             for k, v in adv_map.items():
                 label = DOTA_ADV_LABELS[k]
@@ -1529,10 +1547,11 @@ async def consume_args(
             return options
     else:
         if control == "status":
-            if client.current_match:
-                client.current_match.query_realtime(channel)
-            else:
-                await channel.send("No live match found.")
+            async with channel.typing():
+                if client.current_match:
+                    client.current_match.query_realtime(channel)
+                else:
+                    await channel.send("No live match found.")
             return None
 
     # if we didn't find the control, just ignore
