@@ -1605,7 +1605,7 @@ async def consume_args(
     return options
 
 
-FUZZ_THRESHOLD = 70
+FUZZ_THRESHOLD = 75
 
 
 def is_game_command(content: str) -> bool:
@@ -1621,7 +1621,7 @@ def is_game_command(content: str) -> bool:
         return False
     # fuzz it
     ratio = fuzz.ratio(word, KEYWORD)
-    return ratio > 70
+    return ratio > FUZZ_THRESHOLD
 
 
 async def main(debug, no_2fa):
