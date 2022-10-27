@@ -22,6 +22,7 @@ While it's started, anyone can say:
 * `cancel`: cancels the scheduled game.
 * `now`: skips ahead to finish the schedule now.
 * `leave`: leaves a scheduled game you joined.
+* `status`: gives the status of a game currently running. Currently only supports Dota 2.
 
 Either when starting it, or while it's started, you can say:
 
@@ -58,7 +59,7 @@ Either when starting it, or while it's started, you can say:
   // first one is default, others can be specified with "game for"
   "games": {
     "apex": {
-      // the developer ID for the role you want to ping for this game
+      // the ID for the role you want to ping for this game
       "role": 123456789123456789,
       // the minimum number of players required to play the game, defaults to 2
       "min": 2,
