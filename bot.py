@@ -1635,7 +1635,7 @@ async def consume_args(
         if control == "status":
             async with channel.typing():
                 if client.current_match:
-                    client.current_match.query_realtime(channel)
+                    client.current_match.query_realtime(channel, gamer.id)
                 else:
                     await channel.send("No live match found.")
             return None
