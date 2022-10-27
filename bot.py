@@ -857,7 +857,7 @@ class DotaMatch(Match):
                 return None
             DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
-            party_size = match["party_size"] or 0
+            party_size = match["party_size"] or 5
             if party_size < self.party_size:
                 return None
             # if this match started before the game started
