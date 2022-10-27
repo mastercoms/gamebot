@@ -128,8 +128,20 @@ class DotaAPI:
         return await DotaAPI.get(url, params=params)
 
     @staticmethod
-    def get_match(match_id: int) -> dict[str, Any]:
-        return client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))["result"]
+    def get_match(match_id: int) -> dict[str, Any] | None:
+        resp = None
+        tries = 0
+        while True:
+            # this endpoint regularly fails, so we retry a few times
+            tries += 1
+            try:
+                resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))
+                break
+            except Exception as e:
+                if tries >= 10:
+                    return None
+                gevent.sleep(2 ** tries - 1.5 + random())
+        return resp["result"]
 
 
 class SteamWorker:
@@ -175,7 +187,7 @@ class SteamWorker:
         def handle_reconnect(delay):
             print(f"Reconnect in {delay}...", )
 
-        @worker.on("friend_invite")
+        @worker.friends.on("friend_invite")
         def handle_friend_invite(user: SteamUser):
             mutual = get_value("mutual_steam_id", table=client.settings_table)
             should_add = True
@@ -193,6 +205,7 @@ class SteamWorker:
                     # search for the requesting user
                     search_for = user_steam_id
                 friends = resp["friendslist"]["friends"]
+                search_for = str(search_for)
                 for friend in friends:
                     if friend["steamid"] == search_for:
                         should_add = True
@@ -230,9 +243,11 @@ class GameClient(discord.Client):
         """
         Creates a new Discord client.
         """
+        global client
         self.opendota = kwargs.pop("opendota")
         self.debug = kwargs.pop("debug", False)
         self.no_2fa = kwargs.pop("no_2fa", True)
+        client = self
 
         super().__init__(*args, **kwargs)
 
@@ -397,7 +412,7 @@ def get_value(key: str, default: Any = None, table=None) -> Any:
     """
     Gets from the key value DB table.
     """
-    table_interface = table or client.db
+    table_interface = table if table is not None else client.db
     res = table_interface.get(Store.k == key)
     if res:
         return res["v"]
@@ -409,7 +424,7 @@ def set_value(key: str, val: Any, table=None):
     """
     Sets to the key value DB table.
     """
-    table_interface = table or client.db
+    table_interface = table if table is not None else client.db
     table_interface.upsert({"k": key, "v": val}, Store.k == key)
 
 
@@ -418,7 +433,7 @@ def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None,
     Gets an existing value in the key value DB table and updates it using update_fn.
     :return: The new value
     """
-    table_interface = table or client.db
+    table_interface = table if table is not None else client.db
     old = get_value(key, default, table=table_interface)
     new = update_fn(old)
     set_value(key, new, table=table_interface)
@@ -618,7 +633,7 @@ class DotaMatch(Match):
     def __init__(self, steam_id: int, party_size: int, channel: discord.TextChannel):
         self.steam_id = steam_id
         self.party_size = party_size
-        self.timestamp = generate_timestamp(utcnow())
+        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=60))
         self.polls = 0
         self.channel = channel
         self.task = None
@@ -656,15 +671,16 @@ class DotaMatch(Match):
         })
 
         def handle_resp(message):
-            live_result = message.watch_live_result
-            if live_result == 0 and message.server_steamid:
+            live_result = message.watch_live_result if message else 0
+            server_steamid = message.server_steam_id if message else 0
+            if live_result == 0 and server_steamid:
                 tries = 0
                 resp = None
                 while True:
                     # this endpoint regularly fails, so we retry a few times
                     tries += 1
                     try:
-                        resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(message.server_steamid))
+                        resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(server_steamid))
                         break
                     except Exception as e:
                         if tries >= 10:
@@ -673,7 +689,7 @@ class DotaMatch(Match):
                             return
                         gevent.sleep(2 ** tries - 1.5 + random())
                 match = resp["match"]
-                teams = resp["teams"]
+                teams = resp.get("teams")
                 team_id = 0
 
                 per_player_stats = {
@@ -688,49 +704,54 @@ class DotaMatch(Match):
                         "denies_count": 0,
                     }
                 }
-                level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
-                for team in teams:
-                    team_idx = team["team_number"] - 2
-                    team_adv = per_player_stats[team_idx]
-                    for player in team["players"]:
-                        for key in team_adv.keys():
-                            val = player[key]
-                            if key == "level":
-                                val = level_to_xp[val - 1]
-                            team_adv[key] += val
-                        if player["accountid"] == self.steam_id:
-                            team_id = team_idx
-                other_team = (team_id + 1) % 2
-                net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
-                adv_map = {"level": 0, "net_worth": net_worth_adv}
-                for key in per_player_stats[team_id].keys():
-                    adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+                adv_map = None
+                if teams:
+                    level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
+                    for team in teams:
+                        team_idx = team["team_number"] - 2
+                        team_adv = per_player_stats[team_idx]
+                        for player in team["players"]:
+                            for key in team_adv.keys():
+                                val = player[key]
+                                if key == "level":
+                                    val = level_to_xp[val - 1]
+                                team_adv[key] += val
+                            if player["accountid"] == self.steam_id:
+                                team_id = team_idx
+                    other_team = (team_id + 1) % 2
+                    net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
+                    adv_map = {"level": 0, "net_worth": net_worth_adv, "\u200B": "\u200B"}
+                    for key in per_player_stats[team_id].keys():
+                        adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+                    adv_map["\u200B\u200B"] = "\u200B"
 
-                buildings = resp["buildings"]
-                # team -> lane[] -> type{} -> tier{}
-                destroyed_buildings = {
-                    2: deepcopy(DOTA_EXPECTED_BUILDINGS),
-                    3: deepcopy(DOTA_EXPECTED_BUILDINGS)
-                }
+                buildings = resp.get("buildings")
                 buildings_populated = False
-                for building in buildings:
-                    team = building["team"]
-                    if team == 0:
-                        continue
-                    lane = building["lane"]
-                    if lane == 0:
-                        continue
-                    btype = building["type"]
-                    # ancient
-                    if btype == 2:
-                        continue
-                    destroyed = building["destroyed"]
-                    if destroyed:
-                        continue
-                    buildings_populated = True
-                    destroyed_buildings[team][lane][btype].remove(building["tier"])
-                highest_towers = {2: 0, 3: 0}
-                rax_count = {2: 0, 3: 0}
+                destroyed_buildings = None
+                if buildings and len(buildings) > 2:
+                    # team -> lane[] -> type{} -> tier{}
+                    destroyed_buildings = {
+                        2: deepcopy(DOTA_EXPECTED_BUILDINGS),
+                        3: deepcopy(DOTA_EXPECTED_BUILDINGS)
+                    }
+                    for building in buildings:
+                        team = building["team"]
+                        if team == 0:
+                            continue
+                        lane = building["lane"]
+                        if lane == 0:
+                            continue
+                        btype = building["type"]
+                        # ancient
+                        if btype == 2:
+                            continue
+                        destroyed = building["destroyed"]
+                        if destroyed:
+                            continue
+                        buildings_populated = True
+                        destroyed_buildings[team][lane][btype].remove(building["tier"])
+                    highest_towers = {2: 0, 3: 0}
+                    rax_count = {2: 0, 3: 0}
                 if buildings_populated:
                     for team, lanes in destroyed_buildings.items():
                         for lane in range(1, 4):
@@ -756,7 +777,7 @@ class DotaMatch(Match):
                 state_name = DOTA_STATE.get(state, "Unknown")
 
                 # get the full lobby time if the game isn't in progress yet
-                if state == 5:
+                if state in (5, 6, 7):
                     duration = DotaMatch.get_duration(match["game_time"])
                     duration_title = "Game Time"
                 else:
@@ -776,30 +797,34 @@ class DotaMatch(Match):
 
                 embed.add_field(name="State", value=state_name, inline=False)
 
-                radiant_score = teams[0]["score"]
-                dire_score = teams[1]["score"]
-                embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+                if teams:
+                    radiant_score = teams[0]["score"]
+                    dire_score = teams[1]["score"]
+                    embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
 
-                embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
+                    embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
 
-                embed.add_field(name="Team Advantage", value="─"*23, inline=False)
+                    embed.add_field(name="Team Advantage", value="─"*40, inline=False)
 
-                for k, v in adv_map.items():
-                    label = DOTA_ADV_LABELS[k]
-                    embed.add_field(name=label, value=v)
+                    for k, v in adv_map.items():
+                        label = DOTA_ADV_LABELS.get(k, k)
+                        embed.add_field(name=label, value=v)
 
-                embed.add_field(name="Building Status", value="─"*23, inline=False)
+                    if buildings_populated:
+                        embed.add_field(name="Building Status", value="─"*40, inline=False)
 
-                if highest_towers[2]:
-                    embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
-                else:
-                    embed.add_field(name="Radiant Towers", value=f"No towers destroyed")
-                if highest_towers[3]:
-                    embed.add_field(name="Dire Towers", value=f"Tier {highest_towers[3]} destroyed")
-                else:
-                    embed.add_field(name="Dire Towers", value=f"No towers destroyed")
-                embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
-                embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
+                    if highest_towers[2]:
+                        embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
+                    else:
+                        embed.add_field(name="Radiant Towers", value=f"No towers destroyed")
+                    if highest_towers[3]:
+                        embed.add_field(name="Dire Towers", value=f"Tier {highest_towers[3]} destroyed")
+                    else:
+                        embed.add_field(name="Dire Towers", value=f"No towers destroyed")
+                    embed.add_field(name="\u200B", value="\u200B")
+                    embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
+                    embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
+                    embed.add_field(name="\u200B", value="\u200B")
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
@@ -829,9 +854,6 @@ class DotaMatch(Match):
             party_size = match["party_size"] or 0
             if party_size < self.party_size:
                 return None
-            # if this match ended prematurely
-            if match["leaver_status"] != 0:
-                return None
             # if this match started before the game started
             if match["start_time"] < self.timestamp:
                 return None
@@ -843,9 +865,7 @@ class DotaMatch(Match):
         await asyncio.sleep(self.get_poll_interval())
         match = await self.get_recent_match()
         self.polls += 1
-        if not match and self.polls < MATCH_MAX_POLLS:
-            self.start_check()
-        else:
+        if match:
             is_dire = match["player_slot"] > 127
             team_num = 1 if is_dire else 0
             won = match["radiant_win"] ^ is_dire
@@ -866,42 +886,47 @@ class DotaMatch(Match):
                 timestamp=match_time,
             )
 
+            # force max width embed
+            embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
+
             # match type
             embed.add_field(name="Type", value=DotaMatch.get_type(match), inline=False)
 
             # score
-            radiant_score = match_details["radiant_score"]
-            dire_score = match_details["dire_score"]
-            embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+            if match_details:
+                radiant_score = match_details["radiant_score"]
+                dire_score = match_details["dire_score"]
+                embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
 
             # team
             embed.add_field(name="Team", value="Dire" if is_dire else "Radiant", inline=False)
 
-            adv_map = {
-                "xp_per_min": 0,
-                "net_worth": 0,
-                "hero_damage": 0,
-                "tower_damage": 0,
-                "hero_healing": 0,
-                "last_hits": 0,
-                "denies": 0,
-            }
-            for player in match_details["players"]:
-                player_team = player["team_number"]
-                for key in adv_map.keys():
-                    if player_team == team_num:
-                        adv_map[key] += player[key]
-                    else:
-                        adv_map[key] -= player[key]
+            if match_details:
+                adv_map = {
+                    "xp_per_min": 0,
+                    "net_worth": 0,
+                    "hero_damage": 0,
+                    "tower_damage": 0,
+                    "hero_healing": 0,
+                    "last_hits": 0,
+                    "denies": 0,
+                }
+                for player in match_details["players"]:
+                    player_team = player["team_number"]
+                    for key in adv_map.keys():
+                        if player_team == team_num:
+                            adv_map[key] += player[key]
+                        else:
+                            adv_map[key] -= player[key]
 
-            adv_map["xp_per_min"] *= match["duration"] / 60.0
-            adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
+                adv_map["xp_per_min"] *= match["duration"] / 60.0
+                adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
 
-            embed.add_field(name="Team Advantage", value="─"*25)
+                embed.add_field(name="Team Advantage", value="─"*40, inline=False)
 
-            for k, v in adv_map.items():
-                label = DOTA_ADV_LABELS[k]
-                embed.add_field(name=label, value=v)
+                for k, v in adv_map.items():
+                    label = DOTA_ADV_LABELS[k]
+                    embed.add_field(name=label, value=v)
 
             # rank
             rank, rank_icon = DOTA_RANKS.get(match["average_rank"])
@@ -913,6 +938,8 @@ class DotaMatch(Match):
             # send
             await self.channel.send(embed=embed)
             client.current_match = None
+        elif self.polls < MATCH_MAX_POLLS:
+            self.start_check()
 
 
 class Game:
@@ -1578,15 +1605,19 @@ async def consume_args(
             option_mode = args.pop(0)
             option = args.pop(0)
             if option_mode == "set":
-                new_value = args.pop(0) if len(args) else None
-                if "id" in option:
-                    tmp = new_value
-                    new_value = get_int(new_value, default=None)
-                    if new_value is None:
-                        new_value = tmp
+                if len(args):
+                    new_value = args.pop(0)
+                    if "id" in option:
+                        tmp = new_value
+                        new_value = get_int(new_value, default=None)
+                        if new_value is None:
+                            new_value = tmp
 
-                set_value(option, new_value, client.settings_table)
-                await channel.send(f"{option}={new_value}")
+                    set_value(option, new_value, client.settings_table)
+                    await channel.send(f"{option}={new_value}")
+                else:
+                    client.settings_table.remove(Setting.k == option)
+                    await channel.send(f"{option}=null")
             else:
                 await channel.send(f"{option}={get_value(option, client.settings_table)}")
             return None
