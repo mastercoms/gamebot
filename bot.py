@@ -624,15 +624,17 @@ DOTA_CACHED_CONSTANTS = {}
 class DotaMatch(Match):
     known_matches: set[int] = set()
     steam_id: int
+    gamer_ids: set[int]
     party_size: int
     timestamp: int
     polls: int
     channel: discord.TextChannel
     task: TaskWrapper | None
 
-    def __init__(self, steam_id: int, party_size: int, channel: discord.TextChannel):
+    def __init__(self, steam_id: int, gamers: list[int], channel: discord.TextChannel):
         self.steam_id = steam_id
-        self.party_size = party_size
+        self.gamer_ids = {gamer.id for gamer in gamers}
+        self.party_size = len(gamers)
         self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=60))
         self.polls = 0
         self.channel = channel
@@ -664,7 +666,11 @@ class DotaMatch(Match):
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
-    def query_realtime(self, channel: discord.TextChannel):
+    def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
+        if gamer_id in self.gamer_ids:
+            msg_task = create_task(channel.send("Can't get status of a match you're playing in."))
+            return
+
         # request spectate for steam server ID
         client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
             "steam_id": make_steam64(self.steam_id)
@@ -1209,7 +1215,7 @@ class Game:
                     if steam_id:
                         client.current_match = DotaMatch(
                             steam_id=steam_id,
-                            party_size=num_gamers,
+                            gamers=gamers,
                             channel=self.channel
                         )
             else:
