@@ -12,6 +12,7 @@ import math
 import os
 import pathlib
 import random
+import re
 import socket
 
 from copy import deepcopy
@@ -28,6 +29,7 @@ import orjson
 
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
+from discord.ext.commands import MemberNotFound
 from httpx_auth import QueryApiKey
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code, make_steam64
@@ -103,6 +105,90 @@ class TaskWrapper:
 
     def __str__(self):
         return f"TaskWrapper<task={self.task}>"
+
+
+class DiscordUtil:
+    _ID_REGEX = re.compile(r'([0-9]{15,20})$')
+
+    @staticmethod
+    def _get_id_match(argument):
+        return DiscordUtil._ID_REGEX.match(argument)
+
+    @staticmethod
+    def _get_from_guilds(getter: str, argument: Any) -> Any:
+        result = None
+        for guild in client.guilds:
+            result = getattr(guild, getter)(argument)
+            if result:
+                return result
+        return result
+
+    @staticmethod
+    async def query_member_named(guild: discord.Guild, argument: str) -> discord.Member | None:
+        cache = guild._state.member_cache_flags.joined
+        if len(argument) > 5 and argument[-5] == '#':
+            username, _, discriminator = argument.rpartition('#')
+            members = await guild.query_members(username, limit=100, cache=cache)
+            return discord.utils.get(members, name=username, discriminator=discriminator)
+        else:
+            members = await guild.query_members(argument, limit=100, cache=cache)
+            return discord.utils.find(lambda m: m.name == argument or m.nick == argument, members)
+
+    @staticmethod
+    async def query_member_by_id(guild: discord.Guild, user_id: int) -> discord.Member | None:
+        ws = client._get_websocket(shard_id=guild.shard_id)
+        cache = guild._state.member_cache_flags.joined
+        if ws.is_ratelimited():
+            # If we're being rate limited on the WS, then fall back to using the HTTP API
+            # So we don't have to wait ~60 seconds for the query to finish
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.HTTPException:
+                return None
+
+            if cache:
+                guild._add_member(member)
+            return member
+
+        # If we're not being rate limited then we can use the websocket to actually query
+        members = await guild.query_members(limit=1, user_ids=[user_id], cache=cache)
+        if not members:
+            return None
+        return members[0]
+
+    @staticmethod
+    async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
+        # from https://github.com/Rapptz/discord.py/blob/master/discord/ext/commands/converter.py
+        match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?([0-9]{15,20})>$', argument)
+        guild = client.guild
+        user_id = None
+
+        if match is None:
+            # not a mention...
+            if guild:
+                result = guild.get_member_named(argument)
+            else:
+                result = DiscordUtil._get_from_guilds('get_member_named', argument)
+        else:
+            user_id = int(match.group(1))
+            if guild:
+                result = guild.get_member(user_id) or discord.utils.get(message.mentions, id=user_id)
+            else:
+                result = DiscordUtil._get_from_guilds('get_member', user_id)
+
+        if not isinstance(result, discord.Member):
+            if guild is None:
+                raise MemberNotFound(argument)
+
+            if user_id is not None:
+                result = await DiscordUtil.query_member_by_id(guild, user_id)
+            else:
+                result = await DiscordUtil.query_member_named(guild, argument)
+
+            if not result:
+                raise MemberNotFound(argument)
+
+        return result
 
 
 class DotaAPI:
@@ -281,6 +367,8 @@ class GameClient(discord.Client):
 
         self.lock: asyncio.Lock | None = None
 
+        self.guild: discord.Guild | None = None
+
         self.db = TinyDB(
             pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
         )
@@ -341,6 +429,7 @@ class GameClient(discord.Client):
             break
         if guild is None:
             return
+        self.guild = guild
         self.now = utcnow()
         save = get_value("saved", table=self.backup_table)
         if save:
@@ -395,7 +484,7 @@ class GameClient(discord.Client):
                     # consume all args
                     while args:
                         options = await consume_args(
-                            args, gamer, message.created_at, get_channel(message.channel), options
+                            args, gamer, message, options
                         )
                         # if we cleared options, then we stop here
                         if not options:
@@ -690,13 +779,13 @@ class DotaMatch(Match):
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
-    def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
+    def query_realtime(self, channel: discord.TextChannel, gamer_id: int, target_steamid: int = 0):
         if not client.steamapi:
             return
 
         # request spectate for steam server ID
         client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": make_steam64(self.steam_id)
+            "steam_id": make_steam64(target_steamid or self.steam_id)
         })
 
         def handle_resp(message):
@@ -965,6 +1054,8 @@ class DotaMatch(Match):
 
             # send
             await self.channel.send(embed=embed)
+            if EXTRA_LOSS_MESSAGE and not won:
+                await self.channel.send(EXTRA_LOSS_MESSAGE)
             client.current_match = None
         elif self.polls < MATCH_MAX_POLLS:
             self.start_check()
@@ -1413,8 +1504,7 @@ def try_steam_id(steam_id: str | int) -> SteamID | None:
 async def consume_args(
     args: list[str],
     gamer: discord.Member,
-    created_at: datetime.datetime,
-    channel: discord.TextChannel,
+    message: discord.Message,
     options: GameOptions,
 ) -> GameOptions | None:
     """
@@ -1423,6 +1513,8 @@ async def consume_args(
     Returning None means we don't interact with the game.
     """
     control = args.pop(0)
+    created_at = message.created_at
+    channel = get_channel(message.channel)
     # if there's a game, try to control it
     if client.current_game:
         if control == "cancel":
@@ -1655,11 +1747,19 @@ async def consume_args(
             return options
     else:
         if control == "status":
-            async with channel.typing():
-                if client.current_match and client.steamapi:
-                    client.current_match.query_realtime(channel, gamer.id)
-                else:
-                    await channel.send("No live match found.")
+            target_steamid = None
+            if len(args):
+                member_arg = args.pop(0)
+                member = await DiscordUtil.convert_user_arg(message, member_arg)
+                if member:
+                    player = client.players_table.get(Player.id == member.id)
+                    if player:
+                        target_steamid = player["steam"]
+            if client.current_match and client.steamapi:
+                async with channel.typing():
+                    client.current_match.query_realtime(channel, gamer.id, target_steamid)
+            else:
+                await channel.send("No live match found.")
             return None
 
     # if we didn't find the control, just ignore
@@ -1746,6 +1846,7 @@ with open("settings.json", "rb") as f:
     KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
 
     EXTRA_FAILURE_MESSAGE = config.get("failure_message", None)
+    EXTRA_LOSS_MESSAGE = config.get("loss_message", None)
 
     GAME_DATA = config["games"]
     GAMES = list(GAME_DATA.keys())
