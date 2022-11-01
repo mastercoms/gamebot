@@ -11,10 +11,10 @@ import logging
 import math
 import os
 import pathlib
+import random
 import socket
 
 from copy import deepcopy
-from random import random
 from typing import Any, Callable
 
 import aiohttp
@@ -28,6 +28,7 @@ import orjson
 
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
+from httpx_auth import QueryApiKey
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code, make_steam64
 from steam.webapi import WebAPI
@@ -47,9 +48,10 @@ if os.name == "nt":
 else:
     # handle POSIX imports
     # for uvloop
-    import uvloop
+    if False:
+        import uvloop
 
-    #uvloop.install()
+        uvloop.install()
 
 asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 
@@ -68,6 +70,18 @@ def get_channel(channel: discord.TextChannel) -> discord.TextChannel:
         if guild is not None:
             settings_channel = guild.get_channel(settings_channel)
     return settings_channel or channel
+
+
+MAX_BACKOFF = 2.0
+BASE_BACKOFF = 0.005
+
+
+def get_backoff(failures: int) -> float:
+    return random.uniform(0, min(MAX_BACKOFF, BASE_BACKOFF * 2 ** failures))
+
+
+def wait_backoff(failures: int):
+    gevent.sleep(get_backoff(failures))
 
 
 class TaskWrapper:
@@ -129,7 +143,8 @@ class DotaAPI:
 
     @staticmethod
     def get_match(match_id: int) -> dict[str, Any] | None:
-        resp = None
+        if not client.steamapi:
+            return None
         tries = 0
         while True:
             # this endpoint regularly fails, so we retry a few times
@@ -139,8 +154,9 @@ class DotaAPI:
                 break
             except Exception as e:
                 if tries >= 10:
+                    print("Failed to get match details:", e)
                     return None
-                gevent.sleep(2 ** tries - 1.5 + random())
+                wait_backoff(tries)
         return resp["result"]
 
 
@@ -192,6 +208,8 @@ class SteamWorker:
             mutual = get_value("mutual_steam_id", table=client.settings_table)
             should_add = True
             if mutual:
+                if not client.steamapi:
+                    return
                 should_add = False
                 user_steam_id = user.steam_id.as_64
                 # search for the mutual user
@@ -200,8 +218,11 @@ class SteamWorker:
                 try:
                     resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
                 except:
-                    # if it's private, try getting the friends list of the mutual target
-                    resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
+                    try:
+                        # if it's private, try getting the friends list of the mutual target
+                        resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
+                    except:
+                        return
                     # search for the requesting user
                     search_for = user_steam_id
                 friends = resp["friendslist"]["friends"]
@@ -255,7 +276,7 @@ class GameClient(discord.Client):
         self._connector: aiohttp.TCPConnector | None = None
 
         self.current_game: Game | None = None
-        self.current_match: Match | None = None
+        self.current_match: DotaMatch | Match | None = None
         self.now: datetime.datetime | None = None
 
         self.lock: asyncio.Lock | None = None
@@ -283,14 +304,14 @@ class GameClient(discord.Client):
             self.dotaclient = Dota2Client(self.steamclient.steam)
             if self.debug:
                 self.dotaclient.verbose_debug = True
+
             def launch_dota():
                 self.dotaclient.launch()
+
             if self.steamclient.logged_on_once:
                 launch_dota()
             else:
                 self.steamclient.steam.once("logged_on", launch_dota)
-
-
         else:
             self.steamclient = None
             self.dotaclient = None
@@ -321,8 +342,8 @@ class GameClient(discord.Client):
         if guild is None:
             return
         self.now = utcnow()
-        for save in self.backup_table.all():
-            save = save["v"]
+        save = get_value("saved", table=self.backup_table)
+        if save:
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
             game_name = save["game_name"]
@@ -343,7 +364,6 @@ class GameClient(discord.Client):
             restored_game.base_mention = save["base_mention"]
             self.current_game = restored_game
             self.current_game.start_countdown()
-            break
         self.backup_table.truncate()
 
     async def on_message(self, message: discord.Message):
@@ -407,8 +427,12 @@ Setting = Query()
 Player = Query()
 Store = Query()
 
+TableValueType = int | float | str | bool
+TableContainerType = list[TableValueType | TableContainerType] | dict[str, TableValueType | TableContainerType]
+TableType = TableValueType | TableContainerType
 
-def get_value(key: str, default: Any = None, table=None) -> Any:
+
+def get_value(key: str, *, default: TableType = None, table=None) -> TableType:
     """
     Gets from the key value DB table.
     """
@@ -420,7 +444,7 @@ def get_value(key: str, default: Any = None, table=None) -> Any:
         return default
 
 
-def set_value(key: str, val: Any, table=None):
+def set_value(key: str, val: TableType, *, table=None):
     """
     Sets to the key value DB table.
     """
@@ -428,13 +452,13 @@ def set_value(key: str, val: Any, table=None):
     table_interface.upsert({"k": key, "v": val}, Store.k == key)
 
 
-def update_value(update_fn: Callable[[Any], Any], key: str, default: Any = None, table=None) -> Any:
+def update_value(update_fn: Callable[[TableType], TableType], key: str, *, default: TableType = None, table=None) -> TableType:
     """
     Gets an existing value in the key value DB table and updates it using update_fn.
     :return: The new value
     """
     table_interface = table if table is not None else client.db
-    old = get_value(key, default, table=table_interface)
+    old = get_value(key, default=default, table=table_interface)
     new = update_fn(old)
     set_value(key, new, table=table_interface)
     return new
@@ -631,7 +655,7 @@ class DotaMatch(Match):
     channel: discord.TextChannel
     task: TaskWrapper | None
 
-    def __init__(self, steam_id: int, gamers: list[int], channel: discord.TextChannel):
+    def __init__(self, steam_id: int, gamers: set[discord.Member], channel: discord.TextChannel):
         self.steam_id = steam_id
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(gamers)
@@ -667,8 +691,7 @@ class DotaMatch(Match):
         return f"{lobby_type} {game_mode}"
 
     def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
-        if gamer_id in self.gamer_ids:
-            msg_task = create_task(channel.send("Can't get status of a match you're playing in."))
+        if not client.steamapi:
             return
 
         # request spectate for steam server ID
@@ -681,7 +704,6 @@ class DotaMatch(Match):
             server_steamid = message.server_steam_id if message else 0
             if live_result == 0 and server_steamid:
                 tries = 0
-                resp = None
                 while True:
                     # this endpoint regularly fails, so we retry a few times
                     tries += 1
@@ -693,7 +715,7 @@ class DotaMatch(Match):
                             print("Failed to get realtime stats:", e)
                             msg_task = create_task(channel.send("Match not started yet."))
                             return
-                        gevent.sleep(2 ** tries - 1.5 + random())
+                        wait_backoff(tries)
                 match = resp["match"]
                 teams = resp.get("teams")
                 team_id = 0
@@ -734,6 +756,7 @@ class DotaMatch(Match):
                 buildings = resp.get("buildings")
                 buildings_populated = False
                 destroyed_buildings = None
+
                 if buildings and len(buildings) > 2:
                     # team -> lane[] -> type{} -> tier{}
                     destroyed_buildings = {
@@ -756,8 +779,10 @@ class DotaMatch(Match):
                             continue
                         buildings_populated = True
                         destroyed_buildings[team][lane][btype].remove(building["tier"])
-                    highest_towers = {2: 0, 3: 0}
-                    rax_count = {2: 0, 3: 0}
+
+                highest_towers = {2: 0, 3: 0}
+                rax_count = {2: 0, 3: 0}
+
                 if buildings_populated:
                     for team, lanes in destroyed_buildings.items():
                         for lane in range(1, 4):
@@ -796,9 +821,6 @@ class DotaMatch(Match):
                     timestamp=match_time,
                 )
 
-                # force max width embed
-                #embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
-
                 embed.add_field(name="Type", value=match_type, inline=False)
 
                 embed.add_field(name="State", value=state_name, inline=False)
@@ -816,8 +838,8 @@ class DotaMatch(Match):
                         label = DOTA_ADV_LABELS.get(k, k)
                         embed.add_field(name=label, value=v)
 
-                    if buildings_populated:
-                        embed.add_field(name="Building Status", value="─"*40, inline=False)
+                if buildings_populated:
+                    embed.add_field(name="Building Status", value="─"*40, inline=False)
 
                     if highest_towers[2]:
                         embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
@@ -1225,8 +1247,8 @@ class Game:
                 check_task = create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
-            no_gamers = update_value(increment, "no_gamers", 0)
-            no_gamers_consecutive = update_value(increment, "no_gamers_consecutive", 0)
+            no_gamers = update_value(increment, "no_gamers", default=0)
+            no_gamers_consecutive = update_value(increment, "no_gamers_consecutive", default=0)
             await self.channel.send(
                 f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row)."
             )
@@ -1619,13 +1641,13 @@ async def consume_args(
                         if new_value is None:
                             new_value = tmp
 
-                    set_value(option, new_value, client.settings_table)
+                    set_value(option, new_value, table=client.settings_table)
                     await channel.send(f"{option}={new_value}")
                 else:
                     client.settings_table.remove(Setting.k == option)
                     await channel.send(f"{option}=null")
             else:
-                await channel.send(f"{option}={get_value(option, client.settings_table)}")
+                await channel.send(f"{option}={get_value(option, table=client.settings_table)}")
             return None
         # if buckets
         if control == "if":
@@ -1634,7 +1656,7 @@ async def consume_args(
     else:
         if control == "status":
             async with channel.typing():
-                if client.current_match:
+                if client.current_match and client.steamapi:
                     client.current_match.query_realtime(channel, gamer.id)
                 else:
                     await channel.send("No live match found.")
@@ -1682,8 +1704,13 @@ async def main(debug, no_2fa):
     mentions.users = True
     mentions.roles = True
 
+    opendota_api_key = os.getenv("GAME_BOT_OPENDOTA")
+    opendota_api_key = QueryApiKey(opendota_api_key) if opendota_api_key else None
+
     # create opendota API HTTP client
-    async with httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True) as opendota:
+    async with (
+        httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True, auth=opendota_api_key) as opendota
+    ):
         # create our client, limit messages to what we need to keep track of
         client = GameClient(
             opendota=opendota,
