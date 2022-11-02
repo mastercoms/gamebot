@@ -232,7 +232,7 @@ class DotaAPI:
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))
                 break
-            except HTTPError as e:
+            except Exception as e:
                 if tries >= 10:
                     print("Failed to get match details:", e)
                     return None
@@ -297,11 +297,11 @@ class SteamWorker:
                 # first try getting the friends list of the requesting user
                 try:
                     resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
-                except HTTPError:
+                except:
                     try:
                         # if it's private, try getting the friends list of the mutual target
                         resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
-                    except HTTPError:
+                    except:
                         return
                     # search for the requesting user
                     search_for = user_steam_id
@@ -530,25 +530,33 @@ class GameClient(discord.Client):
                 if not voice_state or not voice_state.channel:
                     return
                 voice_channel = voice_state.channel
+                voice_client: discord.VoiceClient | None = None
+                for voice_client in self.voice_clients:
+                    if voice_client.channel == voice_channel:
+                        break
+                    if voice_client.guild == voice_channel.guild:
+                        await voice_client.disconnect()
                 response_text = preprocess_text(message.content)
                 responses = self.responses_table.search(Response.processed_text == response_text)
                 if len(responses):
                     response = random.choice(responses)
-                    voice_client: discord.VoiceClient = await voice_channel.connect(self_deaf=True)
-                    link = response.response_link
+                    link = response["response_link"]
                     file_name = link.split("/")[-1]
                     cache_path = self.responses_cache / file_name
                     if not cache_path.exists():
-                        with open(cache_path) as download_file:
-                            with httpx.stream("GET", link) as response:
-                                for chunk in response.iter_bytes():
+                        with open(cache_path, "wb") as download_file:
+                            with httpx.stream("GET", link) as stream:
+                                for chunk in stream.iter_bytes():
                                     download_file.write(chunk)
+
+                    if not voice_client:
+                        voice_client = await voice_channel.connect(self_deaf=True)
 
                     async def disconnect():
                         await asyncio.sleep(0.2)
                         await voice_client.disconnect()
 
-                    voice_client.play(discord.FFmpegPCMAudio(str(cache_path)), after=lambda e: create_task(disconnect, name="Disconnect Voice"))
+                    voice_client.play(discord.FFmpegOpusAudio(str(cache_path)), after=lambda e: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
         except Exception as e:
             print(e)
             await get_channel(message.channel).send("An unexpected error occurred.")
@@ -652,7 +660,7 @@ MATCH_POLL_INTERVALS = [10 * 60, 10 * 60, 5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
-MATCH_WAIT_TIME = 5 * 60
+MATCH_WAIT_TIME = 60
 
 
 class Match:
@@ -847,7 +855,7 @@ class DotaMatch(Match):
                     try:
                         resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(server_steamid))
                         break
-                    except HTTPError as e:
+                    except Exception as e:
                         if tries >= 10:
                             print("Failed to get realtime stats:", e)
                             msg_task = create_task(channel.send("Match not started yet."))
@@ -1011,14 +1019,14 @@ class DotaMatch(Match):
         if matches:
             match = matches[0]
             print(match)
-            print(DotaMatch.known_matches)
             print(self.party_size)
             print(self.timestamp)
-            # we've seen this match before
-            match_id = match["match_id"]
-            if match_id in DotaMatch.known_matches:
-                return None
-            DotaMatch.known_matches.add(match_id)
+            if False:
+                # we've seen this match before
+                match_id = match["match_id"]
+                if match_id in DotaMatch.known_matches:
+                    return None
+                DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
             party_size = match["party_size"] or 5
             if party_size < self.party_size:
@@ -1045,6 +1053,7 @@ class DotaMatch(Match):
             # wait for match details to be available
             await asyncio.sleep(MATCH_WAIT_TIME)
             match_details = await DotaAPI.get_match(match_id)
+            print(match_details)
 
             # match time
             match_time = generate_datetime(match["start_time"])
@@ -1766,10 +1775,13 @@ async def consume_args(
                     vanity = vanity.replace("http://", "")
                     vanity = vanity.rstrip("/")
                 # either a /id/ URL or a raw vanity
-                resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
-                vanity = resp.get("response", {}).get("steamid")
-                if vanity:
-                    steam_id = try_steam_id(vanity)
+                try:
+                    resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
+                    vanity = resp.get("response", {}).get("steamid")
+                    if vanity:
+                        steam_id = try_steam_id(vanity)
+                except:
+                    pass
             if not steam_id:
                 await channel.send("Steam ID not found.")
                 return None
@@ -1862,6 +1874,7 @@ async def main(debug, no_2fa):
     intents.guilds = True
     intents.members = True
     intents.message_content = True
+    intents.voice_states = True
 
     # limit the mentions to the ones required
     mentions = AllowedMentions.none()
