@@ -29,7 +29,7 @@ PUNCTUATION_TRANS = str.maketrans(string.punctuation, ' ' * len(string.punctuati
 WHITESPACE_TRANS = str.maketrans(string.whitespace, ' ' * len(string.whitespace))
 
 Responses = TinyDB(
-    pathlib.Path("./responses.json"), access_mode="r+", storage=BetterJSONStorage
+    pathlib.Path("responses.bin"), access_mode="r+", storage=BetterJSONStorage
 )
 Response = Query()
 

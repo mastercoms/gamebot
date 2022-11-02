@@ -156,7 +156,6 @@ class DiscordUtil:
 
     @staticmethod
     async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
-
         match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?(\d{15,20})>$', argument)
         result = None
         guild = client.guild
@@ -394,7 +393,7 @@ class GameClient(discord.Client):
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
         self.responses_table = TinyDB(
-            pathlib.Path("./responses.json"), access_mode="r+", storage=BetterJSONStorage
+            pathlib.Path("responses.bin"), access_mode="r+", storage=BetterJSONStorage
         )
         self.responses_cache = pathlib.Path("./responses_cache")
         self.responses_cache.mkdir(exist_ok=True)
