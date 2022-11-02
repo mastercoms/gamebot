@@ -38,6 +38,7 @@ from steam.client import SteamClient
 from steam.client.user import SteamUser
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
+from requests.exceptions import HTTPError
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
@@ -50,6 +51,7 @@ if os.name == "nt":
 else:
     # handle POSIX imports
     # for uvloop
+    # while we have steam client, we cannot use uvloop due to gevent
     if False:
         import uvloop
 
@@ -108,7 +110,7 @@ class TaskWrapper:
 
 
 class DiscordUtil:
-    _ID_REGEX = re.compile(r'([0-9]{15,20})$')
+    _ID_REGEX = re.compile(r'(\d{15,20})$')
 
     @staticmethod
     def _get_id_match(argument):
@@ -150,7 +152,7 @@ class DiscordUtil:
     @staticmethod
     async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
         # from https://github.com/Rapptz/discord.py/blob/master/discord/ext/commands/converter.py
-        match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?([0-9]{15,20})>$', argument)
+        match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?(\d{15,20})>$', argument)
         result = None
         guild = client.guild
         user_id = None
@@ -226,7 +228,7 @@ class DotaAPI:
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))
                 break
-            except Exception as e:
+            except HTTPError as e:
                 if tries >= 10:
                     print("Failed to get match details:", e)
                     return None
@@ -291,11 +293,11 @@ class SteamWorker:
                 # first try getting the friends list of the requesting user
                 try:
                     resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
-                except:
+                except HTTPError:
                     try:
                         # if it's private, try getting the friends list of the mutual target
                         resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
-                    except:
+                    except HTTPError:
                         return
                     # search for the requesting user
                     search_for = user_steam_id
@@ -787,7 +789,7 @@ class DotaMatch(Match):
                     try:
                         resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(server_steamid))
                         break
-                    except Exception as e:
+                    except HTTPError as e:
                         if tries >= 10:
                             print("Failed to get realtime stats:", e)
                             msg_task = create_task(channel.send("Match not started yet."))
@@ -864,7 +866,7 @@ class DotaMatch(Match):
                     for team, lanes in destroyed_buildings.items():
                         for lane in range(1, 4):
                             btypes = lanes[lane]
-                            # get lowest tower destroyed
+                            # get the lowest tower destroyed
                             tower = btypes[0][-1] if len(btypes[0]) else 0
                             if highest_towers[team] < tower:
                                 highest_towers[team] = tower
@@ -1491,7 +1493,7 @@ def convert_humanize_decimal(quantity: float, unit: str) -> str:
 def try_steam_id(steam_id: str | int) -> SteamID | None:
     try:
         return SteamID(steam_id)
-    except:
+    except AssertionError:
         return None
 
 

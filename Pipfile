@@ -22,6 +22,9 @@ async-lru = "*"
 dota2 = "*"
 asyncio-gevent = "*"
 httpx-auth = "*"
+aiohttp = "*"
+orjson = "*"
+requests = "*"
 
 [requires]
 python_version = "3.10"
