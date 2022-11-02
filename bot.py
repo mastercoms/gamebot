@@ -1050,8 +1050,12 @@ class DotaMatch(Match):
 
             # send
             await self.channel.send(embed=embed)
-            if EXTRA_LOSS_MESSAGE and not won:
-                await self.channel.send(EXTRA_LOSS_MESSAGE)
+            if won:
+                if EXTRA_WIN_MESSAGE:
+                    await self.channel.send(EXTRA_WIN_MESSAGE)
+            else:
+                if EXTRA_LOSS_MESSAGE:
+                    await self.channel.send(EXTRA_LOSS_MESSAGE)
             client.current_match = None
         elif self.polls < MATCH_MAX_POLLS:
             self.start_check()
@@ -1848,6 +1852,7 @@ with open("settings.json", "rb") as f:
     KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
 
     EXTRA_FAILURE_MESSAGE = config.get("failure_message", None)
+    EXTRA_WIN_MESSAGE = config.get("win_message", None)
     EXTRA_LOSS_MESSAGE = config.get("loss_message", None)
 
     GAME_DATA = config["games"]
