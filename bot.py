@@ -1758,8 +1758,13 @@ async def consume_args(
     if control == "status":
         match = client.current_match
         if args:
+            match = None
             member_arg = args.pop(0)
-            member = await DiscordUtil.convert_user_arg(message, member_arg)
+            try:
+                member = await DiscordUtil.convert_user_arg(message, member_arg)
+            except MemberNotFound as e:
+                await channel.send(str(e))
+                return None
             if member:
                 player = client.players_table.get(Player.id == member.id)
                 if player:
