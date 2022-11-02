@@ -16,7 +16,7 @@ import re
 import socket
 
 from copy import deepcopy
-from typing import Any, Callable, ForwardRef
+from typing import Any, Callable
 
 import aiohttp
 import arrow
@@ -517,8 +517,8 @@ Player = Query()
 Store = Query()
 
 TableValueType = int | float | str | bool
-TableContainerTypeRef = ForwardRef("TableContainerType")
-TableContainerType = list[TableValueType | TableContainerTypeRef] | dict[str, TableValueType | TableContainerTypeRef]
+TableContainerValueType = "TableValueType | TableContainerType"
+TableContainerType = list[TableContainerValueType] | dict[str, TableContainerValueType]
 TableType = TableValueType | TableContainerType
 
 
