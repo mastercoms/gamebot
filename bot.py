@@ -965,6 +965,10 @@ class DotaMatch(Match):
         )
         if matches:
             match = matches[0]
+            print(match)
+            print(DotaMatch.known_matches)
+            print(self.party_size)
+            print(self.timestamp)
             # we've seen this match before
             match_id = match["match_id"]
             if match_id in DotaMatch.known_matches:
