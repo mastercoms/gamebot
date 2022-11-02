@@ -14,6 +14,7 @@ import pathlib
 import random
 import re
 import socket
+import string
 
 from copy import deepcopy
 from typing import Any, Callable
@@ -110,6 +111,10 @@ class TaskWrapper:
 
 
 class DiscordUtil:
+    # from https://github.com/Rapptz/discord.py/blob/master/discord/ext/commands/converter.py
+    # Copyright (c) 2015-present Rapptz
+    # MIT License
+
     _ID_REGEX = re.compile(r'(\d{15,20})$')
 
     @staticmethod
@@ -151,7 +156,7 @@ class DiscordUtil:
 
     @staticmethod
     async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
-        # from https://github.com/Rapptz/discord.py/blob/master/discord/ext/commands/converter.py
+
         match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?(\d{15,20})>$', argument)
         result = None
         guild = client.guild
@@ -331,6 +336,29 @@ class SteamWorker:
             self.steam.disconnect()
 
 
+PUNCTUATION_TRANS = str.maketrans(string.punctuation, ' ' * len(string.punctuation))
+WHITESPACE_TRANS = str.maketrans(string.whitespace, ' ' * len(string.whitespace))
+
+
+def preprocess_text(text):
+    """Method for pre-processing the given response text.
+    It:
+    * replaces all punctuations with spaces
+    * replaces all whitespace characters (tab, newline etc) with spaces
+    * removes trailing and leading spaces
+    * removes double spaces
+    * changes to lowercase
+    :param text: the text to be cleaned
+    :return: cleaned text
+    """
+
+    text = text.translate(PUNCTUATION_TRANS)
+    text = text.translate(WHITESPACE_TRANS)
+    text = text.strip().lower()
+    text = re.sub(' +', ' ', text)
+    return text
+
+
 class GameClient(discord.Client):
     """
     The Discord client for this bot.
@@ -365,6 +393,11 @@ class GameClient(discord.Client):
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
+        self.responses_table = TinyDB(
+            pathlib.Path("./responses.json"), access_mode="r+", storage=BetterJSONStorage
+        )
+        self.responses_cache = pathlib.Path("./responses_cache")
+        self.responses_cache.mkdir(exist_ok=True)
         steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
             self.steamapi = WebAPI(
@@ -492,6 +525,31 @@ class GameClient(discord.Client):
 
                     # add to game
                     await self.current_game.add_gamer(message.author, options.bucket)
+            else:
+                # if in voice
+                voice_state = message.author.voice
+                if not voice_state or not voice_state.channel:
+                    return
+                voice_channel = voice_state.channel
+                response_text = preprocess_text(message.content)
+                responses = self.responses_table.search(Response.processed_text == response_text)
+                if len(responses):
+                    response = random.choice(responses)
+                    voice_client: discord.VoiceClient = await voice_channel.connect(self_deaf=True)
+                    link = response.response_link
+                    file_name = link.split("/")[-1]
+                    cache_path = self.responses_cache / file_name
+                    if not cache_path.exists():
+                        with open(cache_path) as download_file:
+                            with httpx.stream("GET", link) as response:
+                                for chunk in response.iter_bytes():
+                                    download_file.write(chunk)
+
+                    async def disconnect():
+                        await asyncio.sleep(0.2)
+                        await voice_client.disconnect()
+
+                    voice_client.play(discord.FFmpegPCMAudio(str(cache_path)), after=lambda e: create_task(disconnect, name="Disconnect Voice"))
         except Exception as e:
             print(e)
             await get_channel(message.channel).send("An unexpected error occurred.")
@@ -502,6 +560,7 @@ client: GameClient | None = None
 Setting = Query()
 Player = Query()
 Store = Query()
+Response = Query()
 
 TableValueType = int | float | str | bool
 TableContainerValueType = "TableValueType | TableContainerType"

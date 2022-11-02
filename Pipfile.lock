@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "b7f64d766e0e02a6c376dec36ee26852337a9d8de3fdd65904a111c93cefa62d"
+            "sha256": "dc0ce7aea5e6a3a503ac5b4cfb117b6ef7988e27c7f83191ca57ef4d195520c6"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -204,7 +204,7 @@
                 "sha256:f902050bb1c658c46745d5bd239dbc200bb31855c1797bceb57bf67c91119f66",
                 "sha256:ffdf33ef6d5322e981006a3715ef920d333f20b570b738254504040a09bf94e6"
             ],
-            "markers": "python_version < '4.0' and python_full_version >= '3.8.0'",
+            "markers": "python_version >= '3.8' and python_version < '4'",
             "version": "==0.5.2"
         },
         "brotli": {
@@ -387,7 +387,8 @@
         },
         "discord.py": {
             "extras": [
-                "speed"
+                "speed",
+                "voice"
             ],
             "hashes": [
                 "sha256:309146476e986cb8faf038cd5d604d4b3834ef15c2d34df697ce5064bf5cd779",
@@ -504,7 +505,7 @@
                 "sha256:f289fae643a3f1c3b909d6b033e6921b05234a4907e9c9c8c3f1fe403e6ac452",
                 "sha256:f48b64578c367b91fa793bf8eaaaf4995cb93c8bc45860e473bf868070ad094e"
             ],
-            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3, 3.4, 3.5'",
+            "markers": "python_version >= '3.7' and python_version < '4'",
             "version": "==21.12.0"
         },
         "gevent-eventemitter": {
@@ -1099,6 +1100,21 @@
             "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3, 3.4'",
             "version": "==3.15.0"
         },
+        "pynacl": {
+            "hashes": [
+                "sha256:06b8f6fa7f5de8d5d2f7573fe8c863c051225a27b61e6860fd047b1775807858",
+                "sha256:0c84947a22519e013607c9be43706dd42513f9e6ae5d39d3613ca1e142fba44d",
+                "sha256:20f42270d27e1b6a29f54032090b972d97f0a1b0948cc52392041ef7831fee93",
+                "sha256:401002a4aaa07c9414132aaed7f6836ff98f59277a234704ff66878c2ee4a0d1",
+                "sha256:52cb72a79269189d4e0dc537556f4740f7f0a9ec41c1322598799b0bdad4ef92",
+                "sha256:61f642bf2378713e2c2e1de73444a3778e5f0a38be6fee0fe532fe30060282ff",
+                "sha256:8ac7448f09ab85811607bdd21ec2464495ac8b7c66d146bf545b0f08fb9220ba",
+                "sha256:a36d4a9dda1f19ce6e03c9a784a2921a4b726b02e1c736600ca9c22029474394",
+                "sha256:a422368fc821589c228f4c49438a368831cb5bbc0eab5ebe1d7fac9dded6567b",
+                "sha256:e46dae94e34b085175f8abb3b0aaa7da40767865ac82c928eeb9e57e1ea8a543"
+            ],
+            "version": "==1.5.0"
+        },
         "python-dateutil": {
             "hashes": [
                 "sha256:0123cacc1627ae19ddf3c27a5de5bd67ee4586fbdd6440d9748f8abb483d3e86",
@@ -1413,7 +1429,7 @@
                 "sha256:3fa96cf423e6987997fc326ae8df396db2a8b7c667747d47ddd8ecba91f4a74e",
                 "sha256:b930dd878d5a8afb066a637fbb35144fe7901e3b209d1cd4f524bd0e9deee997"
             ],
-            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3, 3.4, 3.5' and python_version < '4.0'",
+            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3, 3.4, 3.5' and python_version < '4'",
             "version": "==1.26.12"
         },
         "uvloop": {

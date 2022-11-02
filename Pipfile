@@ -7,7 +7,7 @@ verify_ssl = true
 black = "*"
 
 [packages]
-"discord.py" = {extras = ["speed"], version = "*"}
+"discord.py" = {extras = ["speed", "voice"], version = "*"}
 arrow = "*"
 dateparser = "*"
 uvloop = {version = "*", sys_platform = "!= 'win32'"}
