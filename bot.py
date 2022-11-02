@@ -951,6 +951,8 @@ class DotaMatch(Match):
 
                 # match ID
                 match_id = match["match_id"]
+                if not match_id:
+                    match_id = ""
 
                 # match time
                 match_time = generate_datetime(match["start_timestamp"])
