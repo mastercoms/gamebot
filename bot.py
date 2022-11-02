@@ -1750,23 +1750,23 @@ async def consume_args(
         if control == "if":
             options.bucket = get_int(args.pop(0), BUCKET_MIN)
             return options
-    else:
-        if control == "status":
-            match = client.current_match
-            if len(args):
-                member_arg = args.pop(0)
-                member = await DiscordUtil.convert_user_arg(message, member_arg)
-                if member:
-                    player = client.players_table.get(Player.id == member.id)
-                    if player:
-                        steam_id = player["steam"]
-                        match = DotaMatch(steam_id, {member}, channel, should_check=False)
-            if match and client.steamapi:
-                async with channel.typing():
-                    match.query_realtime(channel, gamer.id)
-            else:
-                await channel.send("No live match found.")
-            return None
+
+    if control == "status":
+        match = client.current_match
+        if args:
+            member_arg = args.pop(0)
+            member = await DiscordUtil.convert_user_arg(message, member_arg)
+            if member:
+                player = client.players_table.get(Player.id == member.id)
+                if player:
+                    steam_id = player["steam"]
+                    match = DotaMatch(steam_id, {member}, channel, should_check=False)
+        if match and client.steamapi:
+            async with channel.typing():
+                match.query_realtime(channel, gamer.id)
+        else:
+            await channel.send("No live match found.")
+        return None
 
     # if we didn't find the control, just ignore
     return options
