@@ -393,7 +393,7 @@ class GameClient(discord.Client):
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
         self.responses_table = TinyDB(
-            pathlib.Path("responses.bin"), access_mode="r+", storage=BetterJSONStorage
+            pathlib.Path("responses.db"), access_mode="r+", storage=BetterJSONStorage
         )
         self.responses_cache = pathlib.Path("./responses_cache")
         self.responses_cache.mkdir(exist_ok=True)
