@@ -999,7 +999,7 @@ class DotaMatch(Match):
 
             # wait for match details to be available
             await asyncio.sleep(MATCH_WAIT_TIME)
-            match_details = DotaAPI.get_match(match_id)
+            match_details = await DotaAPI.get_match(match_id)
 
             # match time
             match_time = generate_datetime(match["start_time"])
