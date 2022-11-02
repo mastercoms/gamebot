@@ -115,15 +115,6 @@ class DiscordUtil:
         return DiscordUtil._ID_REGEX.match(argument)
 
     @staticmethod
-    def _get_from_guilds(getter: str, argument: Any) -> Any:
-        result = None
-        for guild in client.guilds:
-            result = getattr(guild, getter)(argument)
-            if result:
-                return result
-        return result
-
-    @staticmethod
     async def query_member_named(guild: discord.Guild, argument: str) -> discord.Member | None:
         cache = guild._state.member_cache_flags.joined
         if len(argument) > 5 and argument[-5] == '#':
@@ -160,6 +151,7 @@ class DiscordUtil:
     async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
         # from https://github.com/Rapptz/discord.py/blob/master/discord/ext/commands/converter.py
         match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?([0-9]{15,20})>$', argument)
+        result = None
         guild = client.guild
         user_id = None
 
@@ -167,14 +159,10 @@ class DiscordUtil:
             # not a mention...
             if guild:
                 result = guild.get_member_named(argument)
-            else:
-                result = DiscordUtil._get_from_guilds('get_member_named', argument)
         else:
             user_id = int(match.group(1))
             if guild:
                 result = guild.get_member(user_id) or discord.utils.get(message.mentions, id=user_id)
-            else:
-                result = DiscordUtil._get_from_guilds('get_member', user_id)
 
         if not isinstance(result, discord.Member):
             if guild is None:
@@ -468,10 +456,7 @@ class GameClient(discord.Client):
             if not message.content:
                 return
 
-            # normalize
-            message.content = message.content.lower()
-
-            if is_game_command(message.content):
+            if is_game_command(message.content.lower()):
                 async with self.lock:
                     # set our global now to when the message was made
                     self.now = message.created_at
@@ -793,7 +778,7 @@ class DotaMatch(Match):
 
         def handle_resp(message):
             live_result = message.watch_live_result if message else 0
-            server_steamid = message.server_steam_id if message else 0
+            server_steamid = message.server_steamid if message else 0
             if live_result == 0 and server_steamid:
                 tries = 0
                 while True:
@@ -1521,7 +1506,7 @@ async def consume_args(
 
     Returning None means we don't interact with the game.
     """
-    control = args.pop(0)
+    control = args.pop(0).lower()
     created_at = message.created_at
     channel = get_channel(message.channel)
     # if there's a game, try to control it
@@ -1551,10 +1536,10 @@ async def consume_args(
                     confirmed_date = None
                     # go through until we get a date
                     while True:
-                        word = args[end]
+                        word = args[end].lower()
                         # combine if space
                         if last > end + 1:
-                            period = args[end + 1]
+                            period = args[end + 1].lower()
                             if period.startswith("p") or period.startswith("a"):
                                 word += period
                                 end += 1
@@ -1623,7 +1608,7 @@ async def consume_args(
                     confirmed_date = None
                     # go through until we get a date
                     while True:
-                        word = args[end]
+                        word = args[end].lower()
                         # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
                         if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
                             i = 0
@@ -1634,7 +1619,7 @@ async def consume_args(
                             word = word[:i]
                             last = len(args)
                         if last > end + 1:
-                            noun = args[end + 1]
+                            noun = args[end + 1].lower()
                             # replace shorthand with longform unit, as required by the parser
                             longform_noun = HUMANIZE_SHORTHAND.get(noun)
                             if longform_noun is not None:
@@ -1677,7 +1662,7 @@ async def consume_args(
                     return options
         else:
             if control == "for":
-                game = args.pop(0)
+                game = args.pop(0).lower()
                 if game in GAMES:
                     options.game = game
                     return options
@@ -1731,8 +1716,8 @@ async def consume_args(
             if not gamer.guild_permissions.administrator:
                 await channel.send("Not permitted to set/get options.")
                 return None
-            option_mode = args.pop(0)
-            option = args.pop(0)
+            option_mode = args.pop(0).lower()
+            option = args.pop(0).lower()
             if option_mode == "set":
                 if len(args):
                     new_value = args.pop(0)
