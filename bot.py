@@ -517,7 +517,7 @@ Player = Query()
 Store = Query()
 
 TableValueType = int | float | str | bool
-TableContainerType = list[TableValueType | TableContainerType] | dict[str, TableValueType | TableContainerType]
+TableContainerType = list[TableValueType | "TableContainerType"] | dict[str, TableValueType | "TableContainerType"]
 TableType = TableValueType | TableContainerType
 
 

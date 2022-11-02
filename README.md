@@ -7,6 +7,13 @@ quick discord bot for pinging people to play games
 1. `pipenv install`
 2. `GAME_BOT_TOKEN=token pipenv run python bot.py` 
 
+Optional environment variables:
+
+* `GAME_BOT_STEAM_KEY`: [Steam Web API key](https://steamcommunity.com/dev/apikey), used for getting match details, handling mutual
+* `GAME_BOT_STEAM_USER`: Used to specify Steam user which will be able to query live match status of friends.
+* `GAME_BOT_STEAM_PASS`: The password for the Steam user.
+* `GAME_BOT_OPENDOTA`: [OpenDota API key](https://www.opendota.com/api-keys) used for using premium tier of OpenDota API, for recent match queries
+
 ## commands
 
 Just say `game` to schedule a game, and say `game` to join up for a scheduled one. Only supports one running at a time.
@@ -22,20 +29,28 @@ While it's started, anyone can say:
 * `cancel`: cancels the scheduled game.
 * `now`: skips ahead to finish the schedule now.
 * `leave`: leaves a scheduled game you joined.
-* `status`: gives the status of a game currently running. Currently only supports Dota 2.
 
 Either when starting it, or while it's started, you can say:
 
 * `if`: set a minimum number of players you'd like to play with. You can say this again to change it. ex: `if 3`, `if 5`, etc.
 
+In any case, anyone can say:
+
+* `status`: gives the status of a game currently running, or of any Discord user's game. Currently only supports Dota 2. 
+* `register`: associates a given Steam user to your Discord account for match handling.
+* `option set`: sets an option (admins only)
+* `option get`: gets an option (admins only)
+
 ## configuration
+
+### settings
 
 `settings.json` starter:
 
 ```json
 {
   "games": {
-    "apex": {
+    "dota": {
       "role": 123456789123456789
     }
   }
@@ -55,10 +70,13 @@ Either when starting it, or while it's started, you can say:
   // an extra message to send when the game fails to find any players
   // perhaps one with a captioned image of megamind ;)
   "failure_message": "",
+  // an extra message to send when you lose a match
+  // perhaps a video or gif of extreme agony and frustration
+  "loss_message": "",
   // the list of available games, required
   // first one is default, others can be specified with "game for"
   "games": {
-    "apex": {
+    "dota": {
       // the ID for the role you want to ping for this game
       "role": 123456789123456789,
       // the minimum number of players required to play the game, defaults to 2
@@ -67,11 +85,16 @@ Either when starting it, or while it's started, you can say:
       // this is used to allow players to specify "game if"
       // so that they are only included if there are enough players
       // defaults to equal to min, not allowing this functionality
-      "max": 2,
+      "max": 5,
     },
-    "fortnite": {
+    "apex": {
       role: 123456789123456790,
     },
   }
 }
 ```
+
+### options
+
+* `channel_id`: forces all bot responses to this channel
+* `mutual_steam_id`: Steam bot will filter auto-accepting friend requests to only users who have this Steam 64 ID added
