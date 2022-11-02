@@ -882,6 +882,12 @@ class DotaMatch(Match):
                     level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
                     for team in teams:
                         team_idx = team["team_number"] - 2
+                        if team_idx not in per_player_stats:
+                            per_player_stats[team_idx] = {
+                                "level": 0,
+                                "lh_count": 0,
+                                "denies_count": 0,
+                            }
                         team_adv = per_player_stats[team_idx]
                         for player in team["players"]:
                             for key in team_adv.keys():
@@ -891,12 +897,13 @@ class DotaMatch(Match):
                                 team_adv[key] += val
                             if player["accountid"] == self.steam_id:
                                 team_id = team_idx
-                    other_team = (team_id + 1) % 2
-                    net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
-                    adv_map = {"level": 0, "net_worth": net_worth_adv, "\u200B": "\u200B"}
-                    for key in per_player_stats[team_id].keys():
-                        adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
-                    adv_map["\u200B\u200B"] = "\u200B"
+                    if len(per_player_stats) == 2:
+                        other_team = (team_id + 1) % 2
+                        net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
+                        adv_map = {"level": 0, "net_worth": net_worth_adv, "\u200B": "\u200B"}
+                        for key in per_player_stats[team_id].keys():
+                            adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+                        adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
                 buildings_populated = False
@@ -970,7 +977,7 @@ class DotaMatch(Match):
 
                 embed.add_field(name="State", value=state_name, inline=False)
 
-                if teams:
+                if teams and adv_map:
                     radiant_score = teams[0]["score"]
                     dire_score = teams[1]["score"]
                     embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
