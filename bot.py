@@ -228,7 +228,7 @@ class DotaAPI:
         return await DotaAPI.get(url, params=params)
 
     @staticmethod
-    def get_match(match_id: int) -> dict[str, Any] | None:
+    async def get_match(match_id: int) -> dict[str, Any] | None:
         if not client.steamapi:
             return None
         tries = 0
@@ -242,7 +242,7 @@ class DotaAPI:
                 if tries >= 10:
                     print("Failed to get match details:", e)
                     return None
-                wait_backoff(tries)
+                await asyncio.sleep(get_backoff(tries))
         return resp["result"]
 
 
@@ -606,6 +606,7 @@ MATCH_POLL_INTERVALS = [10 * 60, 10 * 60, 5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
+MATCH_WAIT_TIME = 5 * 60
 
 
 class Match:
@@ -744,7 +745,7 @@ class DotaMatch(Match):
     channel: discord.TextChannel
     task: TaskWrapper | None
 
-    def __init__(self, steam_id: int, gamers: set[discord.Member], channel: discord.TextChannel):
+    def __init__(self, steam_id: int, gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
         self.steam_id = steam_id
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(gamers)
@@ -752,7 +753,8 @@ class DotaMatch(Match):
         self.polls = 0
         self.channel = channel
         self.task = None
-        self.start_check()
+        if should_check:
+            self.start_check()
 
     def start_check(self):
         self.task = create_task(self.check_match(), name="Match Check")
@@ -779,13 +781,13 @@ class DotaMatch(Match):
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
-    def query_realtime(self, channel: discord.TextChannel, gamer_id: int, target_steamid: int = 0):
+    def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
         if not client.steamapi:
             return
 
         # request spectate for steam server ID
         client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": make_steam64(target_steamid or self.steam_id)
+            "steam_id": make_steam64(self.steam_id)
         })
 
         def handle_resp(message):
@@ -990,6 +992,8 @@ class DotaMatch(Match):
             # match ID
             match_id = match["match_id"]
 
+            # wait for match details to be available
+            await asyncio.sleep(MATCH_WAIT_TIME)
             match_details = DotaAPI.get_match(match_id)
 
             # match time
@@ -1747,17 +1751,18 @@ async def consume_args(
             return options
     else:
         if control == "status":
-            target_steamid = None
+            match = client.current_match
             if len(args):
                 member_arg = args.pop(0)
                 member = await DiscordUtil.convert_user_arg(message, member_arg)
                 if member:
                     player = client.players_table.get(Player.id == member.id)
                     if player:
-                        target_steamid = player["steam"]
-            if client.current_match and client.steamapi:
+                        steam_id = player["steam"]
+                        match = DotaMatch(steam_id, {member}, channel, should_check=False)
+            if match and client.steamapi:
                 async with channel.typing():
-                    client.current_match.query_realtime(channel, gamer.id, target_steamid)
+                    match.query_realtime(channel, gamer.id)
             else:
                 await channel.send("No live match found.")
             return None
