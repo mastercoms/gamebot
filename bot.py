@@ -532,12 +532,6 @@ class GameClient(discord.Client):
                 if not voice_state or not voice_state.channel:
                     return
                 voice_channel = voice_state.channel
-                voice_client: discord.VoiceClient | None = None
-                for voice_client in self.voice_clients:
-                    if voice_client.channel == voice_channel:
-                        break
-                    if voice_client.guild == voice_channel.guild:
-                        await voice_client.disconnect()
                 if message.content.lower() == "random voiceline":
                     responses = self.responses_table.all()
                 else:
@@ -548,22 +542,33 @@ class GameClient(discord.Client):
                     link = response["response_link"]
                     file_name = link.split("/")[-1]
                     cache_path = self.responses_cache / file_name
-                    failed = False
-                    try:
-                        if not cache_path.exists():
-                            with open(cache_path, "wb") as download_file:
-                                with httpx.stream("GET", link) as stream:
-                                    for chunk in stream.iter_bytes():
-                                        download_file.write(chunk)
-                    except Exception as e:
-                        print(e)
-                        failed = True
-                        pass
+                    tries = 0
+                    while True:
+                        tries += 1
+                        try:
+                            if not cache_path.exists():
+                                with open(cache_path, "wb") as download_file:
+                                    with httpx.stream("GET", link) as stream:
+                                        for chunk in stream.iter_bytes():
+                                            download_file.write(chunk)
+                                            await asyncio.sleep(0.02)
+                            if cache_path.stat().st_size < 2048 or not cache_path.exists():
+                                raise Exception("Corrupted file download")
+                            break
+                        except Exception as e:
+                            cache_path.unlink(missing_ok=True)
+                            if tries >= 4:
+                                print("Failed to download voice response:", e)
+                                await get_channel(message.channel).send("Error: failed to download response, please try again")
+                                return
+                            await asyncio.sleep(get_backoff(tries))
 
-                    if failed or cache_path.stat().st_size < 2048 or not cache_path.exists():
-                        cache_path.unlink(missing_ok=True)
-                        await get_channel(message.channel).send("Error: failed to download response, please try again")
-                        return
+                    voice_client: discord.VoiceClient | None = None
+                    for voice_client in self.voice_clients:
+                        if voice_client.channel == voice_channel:
+                            break
+                        if voice_client.guild == voice_channel.guild:
+                            await voice_client.disconnect()
 
                     if not voice_client:
                         self.play_queue.clear()
