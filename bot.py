@@ -548,13 +548,19 @@ class GameClient(discord.Client):
                     link = response["response_link"]
                     file_name = link.split("/")[-1]
                     cache_path = self.responses_cache / file_name
-                    if not cache_path.exists():
-                        with open(cache_path, "wb") as download_file:
-                            with httpx.stream("GET", link) as stream:
-                                for chunk in stream.iter_bytes():
-                                    download_file.write(chunk)
+                    failed = False
+                    try:
+                        if not cache_path.exists():
+                            with open(cache_path, "wb") as download_file:
+                                with httpx.stream("GET", link) as stream:
+                                    for chunk in stream.iter_bytes():
+                                        download_file.write(chunk)
+                    except Exception as e:
+                        print(e)
+                        failed = True
+                        pass
 
-                    if not cache_path.stat().st_size or not cache_path.exists():
+                    if failed or cache_path.stat().st_size < 2048 or not cache_path.exists():
                         cache_path.unlink(missing_ok=True)
                         await get_channel(message.channel).send("Error: failed to download response, please try again")
                         return
