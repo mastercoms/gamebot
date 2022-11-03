@@ -557,6 +557,7 @@ class GameClient(discord.Client):
                         return
 
                     if not voice_client:
+                        self.play_queue.clear()
                         voice_client = await voice_channel.connect(self_deaf=True)
 
                     def play(path: Path):
