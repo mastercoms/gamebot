@@ -368,9 +368,10 @@ class GameClient(discord.Client):
         Creates a new Discord client.
         """
         global client
-        self.opendota = kwargs.pop("opendota")
-        self.debug = kwargs.pop("debug", False)
-        self.no_2fa = kwargs.pop("no_2fa", True)
+        self.opendota: httpx.AsyncClient = kwargs.pop("opendota")
+        self.http_client: httpx.AsyncClient = kwargs.pop("http_client")
+        self.debug: bool = kwargs.pop("debug", False)
+        self.no_2fa: bool = kwargs.pop("no_2fa", True)
         client = self
 
         super().__init__(*args, **kwargs)
@@ -548,16 +549,15 @@ class GameClient(discord.Client):
                         try:
                             if not cache_path.exists():
                                 with open(cache_path, "wb") as download_file:
-                                    with httpx.stream("GET", link) as stream:
-                                        for chunk in stream.iter_bytes():
+                                    async with self.http_client.stream("GET", link) as stream:
+                                        async for chunk in stream.aiter_bytes():
                                             download_file.write(chunk)
-                                            await asyncio.sleep(0.02)
                             if cache_path.stat().st_size < 2048 or not cache_path.exists():
                                 raise Exception("Corrupted file download")
                             break
                         except Exception as e:
                             cache_path.unlink(missing_ok=True)
-                            if tries >= 4:
+                            if tries >= 3:
                                 print("Failed to download voice response:", e)
                                 await get_channel(message.channel).send("Error: failed to download response, please try again")
                                 return
@@ -835,12 +835,15 @@ class DotaMatch(Match):
         self.steam_id = steam_id
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(gamers)
-        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=60))
+        self.update_timestamp()
         self.polls = 0
         self.channel = channel
         self.task = None
         if should_check:
             self.start_check()
+
+    def update_timestamp(self):
+        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=5 * 60))
 
     def start_check(self):
         self.task = create_task(self.check_match(), name="Match Check")
@@ -988,6 +991,9 @@ class DotaMatch(Match):
 
                 # match time
                 match_time = generate_datetime(match["start_timestamp"])
+                # uninitialized match time
+                if match_time.year != self.timestamp.year:
+                    match_time = None
 
                 # game state
                 state = match["game_state"]
@@ -1059,9 +1065,6 @@ class DotaMatch(Match):
         )
         if matches:
             match = matches[0]
-            print(match)
-            print(self.party_size)
-            print(self.timestamp)
             if False:
                 # we've seen this match before
                 match_id = match["match_id"]
@@ -1091,10 +1094,13 @@ class DotaMatch(Match):
             # match ID
             match_id = match["match_id"]
 
+            # reset to keep looking for games
+            self.update_timestamp()
+            self.polls = 0
+
             # wait for match details to be available
             await asyncio.sleep(MATCH_WAIT_TIME)
             match_details = await DotaAPI.get_match(match_id)
-            print(match_details)
 
             # match time
             match_time = generate_datetime(match["start_time"])
@@ -1165,7 +1171,7 @@ class DotaMatch(Match):
                 if EXTRA_LOSS_MESSAGE:
                     await self.channel.send(EXTRA_LOSS_MESSAGE)
             client.current_match = None
-        elif self.polls < MATCH_MAX_POLLS:
+        if self.polls < MATCH_MAX_POLLS:
             self.start_check()
 
 
@@ -1927,11 +1933,13 @@ async def main(debug, no_2fa):
 
     # create opendota API HTTP client
     async with (
-        httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True, auth=opendota_api_key) as opendota
+        httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True, auth=opendota_api_key) as opendota,
+        httpx.AsyncClient(timeout=10.0, http2=True) as http_client
     ):
         # create our client, limit messages to what we need to keep track of
         client = GameClient(
             opendota=opendota,
+            http_client=http_client,
             debug=debug,
             no_2fa=no_2fa,
             max_messages=500,
