@@ -538,8 +538,11 @@ class GameClient(discord.Client):
                         break
                     if voice_client.guild == voice_channel.guild:
                         await voice_client.disconnect()
-                response_text = preprocess_text(message.content)
-                responses = self.responses_table.search(Response.processed_text == response_text)
+                if message.content.lower() == "random voiceline":
+                    responses = self.responses_table.all()
+                else:
+                    response_text = preprocess_text(message.content)
+                    responses = self.responses_table.search(Response.processed_text == response_text)
                 if len(responses):
                     response = random.choice(responses)
                     link = response["response_link"]
