@@ -551,6 +551,11 @@ class GameClient(discord.Client):
                                 for chunk in stream.iter_bytes():
                                     download_file.write(chunk)
 
+                    if not cache_path.stat().st_size or not cache_path.exists():
+                        cache_path.unlink(missing_ok=True)
+                        await get_channel(message.channel).send("Error: failed to download response, please try again")
+                        return
+
                     if not voice_client:
                         voice_client = await voice_channel.connect(self_deaf=True)
 
