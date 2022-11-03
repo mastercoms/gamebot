@@ -209,7 +209,7 @@ class DotaAPI:
     @staticmethod
     def query_constant_name(constants: dict[str, dict[str, Any]], resource: str, idx: int) -> str:
         constant = constants[resource]
-        data = constant[str(idx)]
+        data = constant.get(str(idx), constant["0"])
         return data["name"].replace(f"{resource}_", "").replace("_", " ").title()
 
     @staticmethod
