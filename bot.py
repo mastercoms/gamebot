@@ -10,13 +10,13 @@ import dataclasses
 import logging
 import math
 import os
-import pathlib
 import random
 import re
 import socket
 import string
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 import aiohttp
@@ -382,20 +382,22 @@ class GameClient(discord.Client):
         self.current_match: DotaMatch | Match | None = None
         self.now: datetime.datetime | None = None
 
+        self.play_queue: list[Path] = []
+
         self.lock: asyncio.Lock | None = None
 
         self.guild: discord.Guild | None = None
 
         self.db = TinyDB(
-            pathlib.Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
+            Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
         )
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
         self.responses_table = TinyDB(
-            pathlib.Path("responses.db"), access_mode="r+", storage=BetterJSONStorage
+            Path("responses.db"), access_mode="r+", storage=BetterJSONStorage
         )
-        self.responses_cache = pathlib.Path("./responses_cache")
+        self.responses_cache = Path("./responses_cache")
         self.responses_cache.mkdir(exist_ok=True)
         steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
@@ -552,11 +554,21 @@ class GameClient(discord.Client):
                     if not voice_client:
                         voice_client = await voice_channel.connect(self_deaf=True)
 
+                    def play(path: Path):
+                        voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda e: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
+
                     async def disconnect():
                         await asyncio.sleep(0.2)
-                        await voice_client.disconnect()
+                        if self.play_queue:
+                            path = self.play_queue.pop(0)
+                            play(path)
+                        else:
+                            await voice_client.disconnect()
 
-                    voice_client.play(discord.FFmpegOpusAudio(str(cache_path)), after=lambda e: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
+                    if voice_client.is_playing() or not voice_client.is_connected():
+                        self.play_queue.append(cache_path)
+                    else:
+                        play(cache_path)
         except Exception as e:
             print(e)
             await get_channel(message.channel).send("An unexpected error occurred.")
