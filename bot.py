@@ -217,9 +217,19 @@ class DotaAPI:
         return DotaAPI.query_constant_name(constants, resource, match[resource])
 
     @staticmethod
-    async def get_matches(steam_id: int, **params) -> list[dict[str, Any]]:
-        url = f"/players/{steam_id}/matches"
-        return await DotaAPI.get(url, params=params)
+    async def get_matches(account_id: int, **params) -> list[dict[str, Any]]:
+        while True:
+            # this endpoint regularly fails, so we retry a few times
+            tries += 1
+            try:
+                resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(account_id=str(account_id), **params)
+                break
+            except Exception as e:
+                if tries >= 3:
+                    print("Failed to get match details:", e)
+                    return None
+                await asyncio.sleep(get_backoff(tries))
+        return resp["result"]["matches"]
 
     @staticmethod
     async def get_match(match_id: int) -> dict[str, Any] | None:
@@ -230,7 +240,7 @@ class DotaAPI:
             # this endpoint regularly fails, so we retry a few times
             tries += 1
             try:
-                resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id))
+                resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id), include_persona_names=True)
                 break
             except Exception as e:
                 if tries >= 10:
@@ -688,11 +698,11 @@ def increment(val: int) -> int:
     return val + 1
 
 
-MATCH_POLL_INTERVALS = [10 * 60, 10 * 60, 5 * 60]
+MATCH_POLL_INTERVALS = [10 * 60, 10 * 60, 1.5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
-MATCH_WAIT_TIME = 60
+MATCH_WAIT_TIME = 2
 
 
 class Match:
@@ -823,7 +833,8 @@ DOTA_CACHED_CONSTANTS = {}
 
 class DotaMatch(Match):
     known_matches: set[int] = set()
-    steam_id: int
+    account_ids: set[int]
+    account_id: int
     gamer_ids: set[int]
     party_size: int
     timestamp: int
@@ -831,10 +842,11 @@ class DotaMatch(Match):
     channel: discord.TextChannel
     task: TaskWrapper | None
 
-    def __init__(self, steam_id: int, gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
-        self.steam_id = steam_id
+    def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
+        self.account_ids = account_ids
+        self.account_id = next(iter(account_ids))
         self.gamer_ids = {gamer.id for gamer in gamers}
-        self.party_size = len(gamers)
+        self.party_size = len(account_ids)
         self.update_timestamp()
         self.polls = 0
         self.channel = channel
@@ -853,9 +865,10 @@ class DotaMatch(Match):
 
     def get_poll_interval(self) -> int | float:
         if self.polls < MATCH_POLL_INTERVAL_COUNT:
-            return MATCH_POLL_INTERVALS[self.polls]
+            poll_interval = MATCH_POLL_INTERVALS[self.polls]
         else:
-            return MATCH_POLL_INTERVAL_LAST
+            poll_interval = MATCH_POLL_INTERVAL_LAST
+        return poll_interval + random.normalvariate(0, math.sqrt(poll_interval * 0.1))
 
     @staticmethod
     def get_duration(time: int) -> str:
@@ -930,7 +943,7 @@ class DotaMatch(Match):
                                 if key == "level":
                                     val = level_to_xp[val - 1]
                                 team_adv[key] += val
-                            if player["accountid"] == self.steam_id:
+                            if player["accountid"] == self.account_id:
                                 team_id = team_idx
                     if len(per_player_stats) == 2:
                         other_team = (team_id + 1) % 2
@@ -1058,21 +1071,23 @@ class DotaMatch(Match):
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
-            self.steam_id,
-            limit=1,
-            date=1,
-            significant=0
+            self.account_id,
+            matches_requested="1"
         )
         if matches:
             match = matches[0]
-            if False:
-                # we've seen this match before
-                match_id = match["match_id"]
-                if match_id in DotaMatch.known_matches:
-                    return None
-                DotaMatch.known_matches.add(match_id)
+            # we've seen this match before
+            match_id = match["match_id"]
+            if match_id in DotaMatch.known_matches:
+                return None
+            DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
-            party_size = match["party_size"] or 5
+            party_size = 0
+            for player in match["players"]:
+                if player["account_id"] in self.account_ids:
+                    party_size += 1
+            match["party_size"] = party_size
+            party_size = party_size or 5
             if party_size < self.party_size:
                 return None
             # if this match started before the game started
@@ -1170,9 +1185,10 @@ class DotaMatch(Match):
             else:
                 if EXTRA_LOSS_MESSAGE:
                     await self.channel.send(EXTRA_LOSS_MESSAGE)
-            client.current_match = None
         if self.polls < MATCH_MAX_POLLS:
             self.start_check()
+        else:
+            client.current_match = None
 
 
 class Game:
@@ -1432,16 +1448,15 @@ class Game:
                 # we had a game
                 set_value("no_gamers_consecutive", 0)
                 # track dota matches
-                if self.game_name == "dota":
-                    steam_id = None
+                if self.game_name == "dota" and not client.current_match:
+                    account_ids = []
                     for gamer in gamers:
                         player = client.players_table.get(Player.id == gamer.id)
                         if player:
-                            steam_id = player["steam"]
-                            break
-                    if steam_id:
+                            account_ids.append(player["steam"])
+                    if account_ids:
                         client.current_match = DotaMatch(
-                            steam_id=steam_id,
+                            account_ids=account_ids,
                             gamers=gamers,
                             channel=self.channel
                         )
@@ -1876,8 +1891,8 @@ async def consume_args(
             if member:
                 player = client.players_table.get(Player.id == member.id)
                 if player:
-                    steam_id = player["steam"]
-                    match = DotaMatch(steam_id, {member}, channel, should_check=False)
+                    account_id = player["steam"]
+                    match = DotaMatch({account_id}, {member}, channel, should_check=False)
         if match and client.steamapi:
             async with channel.typing():
                 match.query_realtime(channel, gamer.id)
