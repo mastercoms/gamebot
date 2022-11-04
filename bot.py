@@ -233,6 +233,11 @@ class DotaAPI:
         return resp["result"]["matches"]
 
     @staticmethod
+    async def get_basic_matches(steam_id: int, **params) -> list[dict[str, Any]]:
+        url = f"/players/{steam_id}/matches"
+        return await DotaAPI.get(url, params=params)
+
+    @staticmethod
     async def get_match(match_id: int) -> dict[str, Any] | None:
         if not client.steamapi:
             return None
@@ -1095,8 +1100,11 @@ class DotaMatch(Match):
             # if this match wasn't relevant for the game we started
             party_size = 0
             for player in match["players"]:
-                if player["account_id"] in self.account_ids:
+                player_account = player["account_id"]
+                if player_account in self.account_ids:
                     party_size += 1
+                if player_account == self.account_id:
+                    match["player_team"] = player["team_number"]
             match["party_size"] = party_size
             party_size = party_size or 5
             if party_size < self.party_size:
@@ -1108,14 +1116,24 @@ class DotaMatch(Match):
         else:
             return None
 
+    async def get_basic_match(self, match_id: int) -> dict[str, Any] | None:
+        matches: list[dict[str, Any]] = await DotaAPI.get_basic_matches(
+            self.account_id,
+            significant=0
+        )
+        if matches:
+            for match in matches:
+                if match["match_id"] == match_id:
+                    return match
+        return None
+
     async def check_match(self):
         await asyncio.sleep(self.get_poll_interval())
         match = await self.get_recent_match()
         self.polls += 1
         if match:
-            is_dire = match["player_slot"] > 127
-            team_num = 1 if is_dire else 0
-            won = match["radiant_win"] ^ is_dire
+            team_num = match["player_team"]
+            is_dire = team_num == 1
 
             # match ID
             match_id = match["match_id"]
@@ -1127,6 +1145,8 @@ class DotaMatch(Match):
             # wait for match details to be available
             await asyncio.sleep(MATCH_WAIT_TIME)
             match_details = await DotaAPI.get_match(match_id)
+
+            won = match_details["radiant_win"] ^ is_dire
 
             # match time
             match_time = generate_datetime(match["start_time"])
@@ -1143,7 +1163,7 @@ class DotaMatch(Match):
             embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
 
             # match type
-            embed.add_field(name="Type", value=DotaMatch.get_type(match), inline=False)
+            embed.add_field(name="Type", value=DotaMatch.get_type(match_details), inline=False)
 
             # score
             if match_details:
@@ -1172,7 +1192,7 @@ class DotaMatch(Match):
                         else:
                             adv_map[key] -= player[key]
 
-                adv_map["xp_per_min"] *= match["duration"] / 60.0
+                adv_map["xp_per_min"] *= match_details["duration"] / 60.0
                 adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
 
                 embed.add_field(name="Team Advantage", value="─"*40, inline=False)
@@ -1182,11 +1202,15 @@ class DotaMatch(Match):
                     embed.add_field(name=label, value=v)
 
             # rank
-            rank, rank_icon = DOTA_RANKS.get(match["average_rank"])
+            basic_match = await self.get_basic_match(match_id)
+            if basic_match:
+                rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
+            else:
+                rank, rank_icon = DOTA_RANKS.get(0)
             embed.set_author(name=rank, icon_url=rank_icon)
 
             # duration
-            embed.set_footer(text=f"Duration: {DotaMatch.get_duration(match['duration'])}")
+            embed.set_footer(text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}")
 
             # send
             await self.channel.send(embed=embed)
