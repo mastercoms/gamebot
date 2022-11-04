@@ -37,9 +37,9 @@ from steam.steamid import SteamID, from_invite_code, make_steam64
 from steam.webapi import WebAPI
 from steam.client import SteamClient
 from steam.client.user import SteamUser
+from steam.enums.common import EFriendRelationship
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
-from requests.exceptions import HTTPError
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 
@@ -850,7 +850,11 @@ class DotaMatch(Match):
         self.account_ids = account_ids
         account_list = list(account_ids)
         friend_ids = [try_steam_id(account_id) for account_id in account_list]
-        friend_ids = [friend_id.account_id for friend_id in friend_ids if friend_id and friend_id in client.steamclient.steam.friends]
+        friend_ids = [friend_id.account_id for friend_id in friend_ids if
+                      friend_id
+                      and friend_id in client.steamclient.steam.friends
+                      and client.steamclient.steam.friends[friend_id].relationship == EFriendRelationship.Friend
+                      ]
         self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(account_ids)
