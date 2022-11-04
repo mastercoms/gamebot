@@ -218,6 +218,7 @@ class DotaAPI:
 
     @staticmethod
     async def get_matches(account_id: int, **params) -> list[dict[str, Any]]:
+        tries = 0
         while True:
             # this endpoint regularly fails, so we retry a few times
             tries += 1
@@ -372,6 +373,9 @@ class GameClient(discord.Client):
     """
     The Discord client for this bot.
     """
+    steamapi: WebAPI | None
+    steamclient: SteamWorker | None
+    dotaclient: Dota2Client | None
 
     def __init__(self, *args, **kwargs):
         """
@@ -844,7 +848,10 @@ class DotaMatch(Match):
 
     def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
         self.account_ids = account_ids
-        self.account_id = next(iter(account_ids))
+        account_list = list(account_ids)
+        friend_ids = [try_steam_id(account_id) for account_id in account_list]
+        friend_ids = [friend_id.account_id for friend_id in friend_ids if friend_id and friend_id in client.steamclient.steam.friends]
+        self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(account_ids)
         self.update_timestamp()
