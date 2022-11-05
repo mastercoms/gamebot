@@ -217,7 +217,7 @@ class DotaAPI:
         return DotaAPI.query_constant_name(constants, resource, match[resource])
 
     @staticmethod
-    async def get_matches(account_id: int, **params) -> list[dict[str, Any]]:
+    async def get_matches(account_id: int, **params) -> list[dict[str, Any]] | None:
         tries = 0
         while True:
             # this endpoint regularly fails, so we retry a few times
@@ -594,7 +594,7 @@ class GameClient(discord.Client):
                         voice_client = await voice_channel.connect(self_deaf=True)
 
                     def play(path: Path):
-                        voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda e: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
+                        voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda err: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
 
                     async def disconnect():
                         await asyncio.sleep(0.2)
@@ -905,7 +905,7 @@ class DotaMatch(Match):
 
         # request spectate for steam server ID
         client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": make_steam64(self.steam_id)
+            "steam_id": make_steam64(self.account_id)
         })
 
         def handle_resp(message):
@@ -1018,11 +1018,11 @@ class DotaMatch(Match):
                 if not match_id:
                     match_id = ""
 
-                # match time
-                match_time = generate_datetime(match["start_timestamp"])
-                # uninitialized match time
-                if match_time.year != self.timestamp.year:
+                # check for uninitialized match time
+                if abs(match["start_timestamp"] - self.timestamp) > 2592000:
                     match_time = None
+                else:
+                    match_time = generate_datetime(match["start_timestamp"])
 
                 # game state
                 state = match["game_state"]
@@ -1484,11 +1484,11 @@ class Game:
                 set_value("no_gamers_consecutive", 0)
                 # track dota matches
                 if self.game_name == "dota" and not client.current_match:
-                    account_ids = []
+                    account_ids = set()
                     for gamer in gamers:
                         player = client.players_table.get(Player.id == gamer.id)
                         if player:
-                            account_ids.append(player["steam"])
+                            account_ids.add(player["steam"])
                     if account_ids:
                         client.current_match = DotaMatch(
                             account_ids=account_ids,
