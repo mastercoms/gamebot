@@ -709,9 +709,10 @@ def increment(val: int) -> int:
 
 MATCH_POLL_INTERVALS = [10 * 60, 5 * 60, 5 * 60, 1.5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
+MATCH_POLL_INTERVAL_FIRST = MATCH_POLL_INTERVALS[0]
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
-MATCH_WAIT_TIME = 2
+MATCH_WAIT_TIME = 60
 
 
 class Match:
@@ -853,8 +854,7 @@ class DotaMatch(Match):
 
     def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
         self.account_ids = account_ids
-        account_list = list(account_ids)
-        friend_ids = [try_steam_id(account_id) for account_id in account_list]
+        friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
         friend_ids = [friend_id.account_id for friend_id in friend_ids if
                       friend_id
                       and friend_id in client.steamclient.steam.friends
@@ -871,7 +871,7 @@ class DotaMatch(Match):
             self.start_check()
 
     def update_timestamp(self):
-        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=5 * 60))
+        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST))
 
     def start_check(self):
         self.task = create_task(self.check_match(), name="Match Check")
@@ -1105,8 +1105,8 @@ class DotaMatch(Match):
                     party_size += 1
                 if player_account == self.account_id:
                     match["player_team"] = player["team_number"]
-            match["party_size"] = party_size
             party_size = party_size or 5
+            match["party_size"] = party_size
             if party_size < self.party_size:
                 return None
             # if this match started before the game started
