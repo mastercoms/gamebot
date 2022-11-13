@@ -911,6 +911,8 @@ class DotaMatch(Match):
         def handle_resp(message):
             live_result = message.watch_live_result if message else 0
             server_steamid = message.server_steamid if message else 0
+            if server_steamid == "0":
+                server_steamid = None
             if live_result == 0 and server_steamid:
                 tries = 0
                 while True:
@@ -1015,7 +1017,7 @@ class DotaMatch(Match):
 
                 # match ID
                 match_id = match["match_id"]
-                if not match_id:
+                if not match_id or match_id == "0":
                     match_id = ""
 
                 # check for uninitialized match time
@@ -1078,7 +1080,7 @@ class DotaMatch(Match):
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
                 msg_task = create_task(channel.send(embed=embed))
-            elif live_result == 4:
+            elif live_result == 4 or live_result == 0:
                 msg_task = create_task(channel.send("No live match found."))
             else:
                 msg_task = create_task(channel.send(f"Failed to get live match data: error code {live_result}"))
