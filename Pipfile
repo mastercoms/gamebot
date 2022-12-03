@@ -25,6 +25,7 @@ httpx-auth = "*"
 aiohttp = "*"
 orjson = "*"
 requests = "*"
+numpy = "*"
 
 [requires]
 python_version = "3.10"

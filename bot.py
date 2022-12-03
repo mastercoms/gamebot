@@ -31,6 +31,7 @@ import orjson
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from discord.ext.commands import MemberNotFound
+from discord.app_commands import command
 from httpx_auth import QueryApiKey
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code, make_steam64
@@ -280,12 +281,12 @@ class SteamWorker:
         def handle_after_logon():
             self.logged_on_once = True
 
-            print("-"*30)
+            print("⎯"*30)
             print("Logged on as:", worker.user.name)
             print("Community profile:", worker.steam_id.community_url)
             print("Last logon:", worker.user.last_logon)
             print("Last logoff:", worker.user.last_logoff)
-            print("-"*30)
+            print("⎯"*30)
 
         @worker.on("disconnected")
         def handle_disconnect():
@@ -498,6 +499,18 @@ class GameClient(discord.Client):
             self.current_game = restored_game
             self.current_game.start_countdown()
         self.backup_table.truncate()
+
+    async def handle_game_command():
+        pass
+
+    async def handle_voiceline_command():
+        pass
+
+    async def on_app_command_game():
+        pass
+
+    async def on_app_command_voiceline():
+        pass
 
     async def on_message(self, message: discord.Message):
         """
@@ -1055,14 +1068,14 @@ class DotaMatch(Match):
 
                     embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
 
-                    embed.add_field(name="Team Advantage", value="─"*40, inline=False)
+                    embed.add_field(name="Team Advantage", value="⎯"*40, inline=False)
 
                     for k, v in adv_map.items():
                         label = DOTA_ADV_LABELS.get(k, k)
                         embed.add_field(name=label, value=v)
 
                 if buildings_populated:
-                    embed.add_field(name="Building Status", value="─"*40, inline=False)
+                    embed.add_field(name="Building Status", value="⎯"*40, inline=False)
 
                     if highest_towers[2]:
                         embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
@@ -1197,7 +1210,7 @@ class DotaMatch(Match):
                 adv_map["xp_per_min"] *= match_details["duration"] / 60.0
                 adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
 
-                embed.add_field(name="Team Advantage", value="─"*40, inline=False)
+                embed.add_field(name="Team Advantage", value="⎯"*40, inline=False)
 
                 for k, v in adv_map.items():
                     label = DOTA_ADV_LABELS[k]
