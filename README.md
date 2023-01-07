@@ -16,7 +16,7 @@ Optional environment variables:
 
 ## commands
 
-Just say `game` to schedule a game, and say `game` to join up for a scheduled one. Only supports one running at a time.
+Just say `game` to schedule a game, and say `game` to join up for a scheduled one. Only supports scheduling one at a time.
 
 When starting it, you can also say some arguments:
 
@@ -64,12 +64,15 @@ In any case, anyone can say:
   // any tz timezone: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
   // used for parsing specified dates for "game at"
   "local_timezone": "US/Eastern",
-  // the keyword to use for messages, this will be fuzzed as well, so
-  // you don't have to worry about 
+  // the keyword to use for messages, this will be fuzzed as well,
+  // so you don't have to worry about typos
   "keyword": "game",
   // an extra message to send when the game fails to find any players
   // perhaps one with a captioned image of megamind ;)
   "failure_message": "",
+  // an extra message to send when you win a match
+  // perhaps a video or gif of confidence and triumph
+  "win_message": "",
   // an extra message to send when you lose a match
   // perhaps a video or gif of extreme agony and frustration
   "loss_message": "",
