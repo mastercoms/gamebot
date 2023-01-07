@@ -9,10 +9,10 @@ quick discord bot for pinging people to play games
 
 Optional environment variables:
 
-* `GAME_BOT_STEAM_KEY`: [Steam Web API key](https://steamcommunity.com/dev/apikey), used for getting match details, handling mutual
-* `GAME_BOT_STEAM_USER`: Used to specify Steam user which will be able to query live match status of friends.
-* `GAME_BOT_STEAM_PASS`: The password for the Steam user.
-* `GAME_BOT_OPENDOTA`: [OpenDota API key](https://www.opendota.com/api-keys) used for using premium tier of OpenDota API, for recent match queries
+* `GAME_BOT_STEAM_KEY`: [Steam Web API key](https://steamcommunity.com/dev/apikey), used for getting match details at the end of the match and handling mutual friends
+* `GAME_BOT_STEAM_USER`: Used to specify Steam user which will be able to query live match status of friends
+* `GAME_BOT_STEAM_PASS`: The password for the Steam user
+* `GAME_BOT_OPENDOTA`: [OpenDota API key](https://www.opendota.com/api-keys) to use the premium tier rather the free tier of the OpenDota API, for additional match details
 
 ## commands
 
@@ -20,9 +20,9 @@ Just say `game` to schedule a game, and say `game` to join up for a scheduled on
 
 When starting it, you can also say some arguments:
 
-* `at`: set a specific date/time to check at. ex: `at 9`, `at 9pm`, `at 9pm PST`, `at 9:30`, etc.
-* `in`: set a length of time to check at. ex: `in 1h`, `in 1.5h`, `in 5m`, `in 5 mins`, `in 5 hours, 20 minutes, 30 seconds`, etc.
-* `for`: set the name of the game to schedule.
+* `at <time>`: set a specific date/time to check at. ex: `at 9`, `at 9pm`, `at 9pm PST`, `at 9:30`, etc.
+* `in <time>`: set a length of time to check at. ex: `in 1h`, `in 1.5h`, `in 5m`, `in 5 mins`, `in 5 hours, 20 minutes, 30 seconds`, etc.
+* `for <game>`: set the name of the game to schedule.
 
 While it's started, anyone can say:
 
@@ -32,14 +32,14 @@ While it's started, anyone can say:
 
 Either when starting it, or while it's started, you can say:
 
-* `if`: set a minimum number of players you'd like to play with. You can say this again to change it. ex: `if 3`, `if 5`, etc.
+* `if <number>`: set a minimum number of players you'd like to play with. You can say this again to change it. ex: `if 3`, `if 5`, etc.
 
 In any case, anyone can say:
 
-* `status`: gives the status of a game currently running, or of any Discord user's game. Currently only supports Dota 2. 
-* `register`: associates a given Steam user to your Discord account for match handling.
-* `option set`: sets an option (admins only)
-* `option get`: gets an option (admins only)
+* `status [user]`: gives the status of a game currently running, or of any specified Discord user's game. Currently only supports Dota 2. 
+* `register <steam account>`: associates a given Steam user to your Discord account for match handling.
+* `option set <key> [value]`: sets an option, or removes it if value not specified (admins only)
+* `option get <key>`: gets an option (admins only)
 
 ## configuration
 
