@@ -195,9 +195,10 @@ class DotaAPI:
     @staticmethod
     async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
         global DOTA_CACHED_CONSTANTS
-        for res in resources:
-            url = f"/constants/{res}"
-            DOTA_CACHED_CONSTANTS[res] = await DotaAPI.get(url)
+        async with httpx.AsyncClient(base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/") as odotagh:
+            for res in resources:
+                url = f"{res}.json"
+                DOTA_CACHED_CONSTANTS[res] = await odotagh.get(url)
         return DOTA_CACHED_CONSTANTS
 
     @staticmethod
