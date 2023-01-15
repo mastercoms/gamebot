@@ -61,6 +61,13 @@ else:
 
 asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 
+DEBUGGING = True
+
+
+def print_debug(*args, **kwargs):
+    if DEBUGGING:
+        print(*args, **kwargs)
+
 
 def create_task(coro, *, name=None):
     task = asyncio.create_task(coro, name=name)
@@ -198,7 +205,8 @@ class DotaAPI:
         async with httpx.AsyncClient(base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/") as odotagh:
             for res in resources:
                 url = f"{res}.json"
-                DOTA_CACHED_CONSTANTS[res] = await odotagh.get(url)
+                DOTA_CACHED_CONSTANTS[res] = (await odotagh.get(url)).json()
+        print_debug(f"Queried {resources} constants: {DOTA_CACHED_CONSTANTS}")
         return DOTA_CACHED_CONSTANTS
 
     @staticmethod
@@ -226,6 +234,7 @@ class DotaAPI:
             tries += 1
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(account_id=str(account_id), **params)
+                print_debug(f"get_matches: {resp}")
                 break
             except Exception as e:
                 if tries >= 3:
@@ -237,7 +246,9 @@ class DotaAPI:
     @staticmethod
     async def get_basic_matches(steam_id: int, **params) -> list[dict[str, Any]]:
         url = f"/players/{steam_id}/matches"
-        return await DotaAPI.get(url, params=params)
+        resp = await DotaAPI.get(url, params=params)
+        print_debug(f"get_basic_matches: {resp}")
+        return resp
 
     @staticmethod
     async def get_match(match_id: int) -> dict[str, Any] | None:
@@ -249,6 +260,7 @@ class DotaAPI:
             tries += 1
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id), include_persona_names=True)
+                print_debug(f"get_match: {resp}")
                 break
             except Exception as e:
                 if tries >= 10:
@@ -922,7 +934,10 @@ class DotaMatch(Match):
             "steam_id": make_steam64(self.account_id)
         })
 
+        print_debug("Querying realtime match stats...")
+
         def handle_resp(message):
+            print_debug(f"Got spectate response! {vars(message) if message else None}")
             live_result = message.watch_live_result if message else 0
             server_steamid = message.server_steamid if message else 0
             if server_steamid == "0":
@@ -934,6 +949,7 @@ class DotaMatch(Match):
                     tries += 1
                     try:
                         resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(server_steamid))
+                        print_debug(f"GetRealtimeStats: {resp}")
                         break
                     except Exception as e:
                         if tries >= 10:
@@ -1122,6 +1138,7 @@ class DotaMatch(Match):
                 if player_account == self.account_id:
                     match["player_team"] = player["team_number"]
             party_size = party_size or 5
+            print_debug(f"party_size: {party_size}")
             match["party_size"] = party_size
             if party_size < self.party_size:
                 return None
@@ -1147,6 +1164,7 @@ class DotaMatch(Match):
         await asyncio.sleep(self.get_poll_interval())
         match = await self.get_recent_match()
         self.polls += 1
+        print_debug(f"match: {match}")
         if match:
             team_num = match["player_team"]
             is_dire = team_num == 1
