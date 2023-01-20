@@ -934,12 +934,12 @@ class DotaMatch(Match):
             "steam_id": make_steam64(self.account_id)
         })
 
-        print_debug("Querying realtime match stats...")
+        print_debug(f"Querying realtime match stats for {self.account_id}...")
 
         def handle_resp(message):
-            print_debug(f"Got spectate response! {vars(message) if message else None}")
             live_result = message.watch_live_result if message else 0
             server_steamid = message.server_steamid if message else 0
+            print_debug(f"Got spectate response! {live_result} {server_steamid}")
             if server_steamid == "0":
                 server_steamid = None
             if live_result == 0 and server_steamid:
