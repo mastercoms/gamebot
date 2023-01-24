@@ -234,7 +234,6 @@ class DotaAPI:
             tries += 1
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(account_id=str(account_id), **params)
-                print_debug(f"get_matches: {resp}")
                 break
             except Exception as e:
                 if tries >= 3:
@@ -247,7 +246,6 @@ class DotaAPI:
     async def get_basic_matches(steam_id: int, **params) -> list[dict[str, Any]]:
         url = f"/players/{steam_id}/matches"
         resp = await DotaAPI.get(url, params=params)
-        print_debug(f"get_basic_matches: {resp}")
         return resp
 
     @staticmethod
@@ -746,6 +744,7 @@ class Match:
 
 
 DOTA_RANKS = {
+    None: ("Unknown", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310"),
     0: ("Unknown", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310"),
 
     10: ("Herald", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/Emoticon_Ranked_Herald.png/revision/latest?cb=20190212051846"),
@@ -1240,7 +1239,7 @@ class DotaMatch(Match):
             if basic_match:
                 rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
             else:
-                rank, rank_icon = DOTA_RANKS.get(0)
+                rank, rank_icon = DOTA_RANKS.get(None)
             embed.set_author(name=rank, icon_url=rank_icon)
 
             # duration
