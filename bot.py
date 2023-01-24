@@ -1239,6 +1239,7 @@ class DotaMatch(Match):
             if basic_match:
                 rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
             else:
+                # TODO: calculate average player rank ourselves
                 rank, rank_icon = DOTA_RANKS.get(None)
             embed.set_author(name=rank, icon_url=rank_icon)
 
