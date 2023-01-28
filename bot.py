@@ -489,6 +489,7 @@ class GameClient(discord.Client):
         self.now = utcnow()
         save = get_value("saved", table=self.backup_table)
         if save:
+            print_debug("Resuming saved", save)
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
             game_name = save["game_name"]
@@ -565,6 +566,7 @@ class GameClient(discord.Client):
                         # if didn't get a date, default to delta
                         if not options.future:
                             options.future = self.now + DEFAULT_DELTA
+                        print_debug("Starting game", options.future, gamer)
                         self.current_game = Game(get_channel(message.channel), gamer, options.game)
                         await self.current_game.start(options.future)
 
@@ -1288,6 +1290,7 @@ class Game:
         """
         Creates a new Game, to be started with start().
         """
+        print_debug("Created new game")
         self.game_name = game_name if game_name else DEFAULT_GAME
 
         self.reset()
@@ -1328,6 +1331,7 @@ class Game:
         """
         Resets the game to require new confirmation, for starting a Game Check.
         """
+        print_debug("Resetted game")
         self.group_buckets = dict()
 
         game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
@@ -1343,6 +1347,7 @@ class Game:
         """
         Starts the game.
         """
+        print_debug("Started game")
         self.update_future(future)
         await self.initialize(mention=mention)
         self.save()
@@ -1363,6 +1368,7 @@ class Game:
         """
         Starts/schedules the game check.
         """
+        print_debug("Initialized game")
         if self.base_mention is None:
             self.base_mention = (
                 f"<@&{GAME_DATA[self.game_name]['role']}>"
