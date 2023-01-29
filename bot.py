@@ -1449,11 +1449,13 @@ class Game:
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < DEFAULT_COUNTDOWN:
+                    print_debug("Refreshing countdown from add_gamer")
                     missing_countdown = datetime.timedelta(
                         seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds()
                     )
                     await self.refresh(self.future + missing_countdown)
             else:
+                print_debug("Adding gamer")
                 short_time = print_timestamp(self.timestamp, "t")
                 relative_time = print_timestamp(self.timestamp, "R")
                 msg = f"{name} can {KEYWORD} at {short_time} ({relative_time}){with_str}. {size}"
@@ -1487,12 +1489,14 @@ class Game:
         """
         Directly starts the asyncio countdown task.
         """
+        print_debug("Starting countdown")
         self.task = create_task(self.countdown(), name="Countdown")
 
     async def refresh(self, future: datetime.datetime):
         """
         Refreshes the game with a new countdown.
         """
+        print_debug("Refreshing")
         self.cancel_task(reason="Refreshing")
         await self.start(future)
 
@@ -1500,6 +1504,7 @@ class Game:
         """
         Sleeps for the countdown time, and then finishes the game.
         """
+        print_debug("Counting down")
         delta = self.get_delta_seconds()
         # if our delta is less than 16 milliseconds, then we don't expect scheduling accuracy and thus don't sleep
         if delta >= 0.016:
@@ -1512,10 +1517,13 @@ class Game:
         """
         gamers = self.get_gamers()
         num_gamers = len(gamers)
+        print_debug("Finishing", gamers)
+        print_debug("Finishing", GAME_DATA[self.game_name])
         if num_gamers >= GAME_DATA[self.game_name].get("min", BUCKET_MIN):
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
+                print_debug("Finishing check")
                 # finish the game
                 await self.channel.send(
                     f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/5** players ready to {KEYWORD}."
@@ -1536,12 +1544,14 @@ class Game:
                             channel=self.channel
                         )
             else:
+                print_debug("Starting check")
                 # start the game up again
                 client.now = utcnow()
                 self.reset()
                 check_task = create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
                 return
         else:
+            print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
             no_gamers_consecutive = update_value(increment, "no_gamers_consecutive", default=0)
             await self.channel.send(
@@ -1559,6 +1569,7 @@ class Game:
         """
         Directly cancels the asyncio countdown task.
         """
+        print_debug("Cancelling task")
         self.task.cancel(msg=reason)
 
     async def update_timestamp(self, new_future: datetime.datetime):
@@ -1576,6 +1587,7 @@ class Game:
         """
         Handles cancelling the game.
         """
+        print_debug("Cancelling")
         self.cancel_task()
         # if checking, then we need to update things that are printed in the message
         if self.is_checking:
@@ -1589,6 +1601,7 @@ class Game:
         """
         Skips ahead to finish the game now.
         """
+        print_debug("Advancing")
         self.cancel_task(reason="Advancing")
         # if checking, then we need to update things that are printed in the message
         if self.is_checking:
