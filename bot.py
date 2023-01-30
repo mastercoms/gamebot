@@ -414,6 +414,8 @@ class GameClient(discord.Client):
         self.current_match: DotaMatch | Match | None = None
         self.now: datetime.datetime | None = None
 
+        self.ready = False
+
         self.play_queue: list[Path] = []
 
         self.lock: asyncio.Lock | None = None
@@ -511,6 +513,8 @@ class GameClient(discord.Client):
             self.current_game = restored_game
             self.current_game.start_countdown()
         self.backup_table.truncate()
+        self.ready = True
+        print("Ready.")
 
     async def handle_game_command():
         pass
@@ -529,6 +533,10 @@ class GameClient(discord.Client):
         Handles new game messages.
         """
         try:
+            # if we're not ready, then we don't do anything
+            if not ready:
+                return
+
             # not a bot
             if message.author.bot:
                 return
