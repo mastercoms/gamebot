@@ -545,7 +545,7 @@ class GameClient(discord.Client):
         Handles new game messages.
         """
         # if not valid, don't do anything
-        if not is_valid_message(message):
+        if not self.is_valid_message(message):
             return
 
         try:
