@@ -490,7 +490,7 @@ class GameClient(discord.Client):
         self.guild = guild
         self.now = utcnow()
         save = get_value("saved", table=self.backup_table)
-        if save:
+        if save and not self.current_game:
             print_debug("Resuming saved", save)
             channel = guild.get_channel(save["channel"])
             author = guild.get_member(save["author"])
