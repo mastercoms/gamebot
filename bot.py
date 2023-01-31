@@ -1575,6 +1575,7 @@ class Game:
             # make it past tense
             await self.replace_message("expires", "expired")
         client.current_game = None
+        print_debug("Truncating backup table")
         client.backup_table.truncate()
 
     def cancel_task(self, reason: str = "Cancelled"):
