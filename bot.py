@@ -528,23 +528,27 @@ class GameClient(discord.Client):
     async def on_app_command_voiceline():
         pass
 
+    def is_valid_message(self, message: discord.Message) -> bool:
+        """
+        Checks if the message is valid.
+        """
+        if not self.ready:
+            return False
+        if message.author.bot:
+            return False
+        if not message.content:
+            return False
+        return True
+
     async def on_message(self, message: discord.Message):
         """
         Handles new game messages.
         """
+        # if not valid, don't do anything
+        if not is_valid_message(message):
+            return
+
         try:
-            # if we're not ready, then we don't do anything
-            if not ready:
-                return
-
-            # not a bot
-            if message.author.bot:
-                return
-
-            # if only an embed, then there's no content to parse
-            if not message.content:
-                return
-
             if is_game_command(message.content.lower()):
                 async with self.lock:
                     # set our global now to when the message was made
