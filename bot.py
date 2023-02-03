@@ -971,6 +971,7 @@ class DotaMatch(Match):
                             return
                         wait_backoff(tries)
                 match = resp["match"]
+                print_debug(match)
                 teams = resp.get("teams")
                 team_id = 0
 
@@ -1018,7 +1019,10 @@ class DotaMatch(Match):
                 buildings_populated = False
                 destroyed_buildings = None
 
-                if buildings and len(buildings) > 2:
+                # match type
+                match_type = DotaMatch.get_type(match)
+
+                if buildings and len(buildings) > 2 and match_type != "Practice Custom":
                     # team -> lane[] -> type{} -> tier{}
                     destroyed_buildings = {
                         2: deepcopy(DOTA_EXPECTED_BUILDINGS),
@@ -1054,9 +1058,6 @@ class DotaMatch(Match):
                                 highest_towers[team] = tower
                             rax = len(btypes[1])
                             rax_count[team] += rax
-
-                # match type
-                match_type = DotaMatch.get_type(match)
 
                 # match ID
                 match_id = match["match_id"]
@@ -1897,7 +1898,7 @@ async def consume_args(
                     options.future = confirmed_date
                     return options
         else:
-            if control == "for":
+            if control == "on":
                 game = args.pop(0).lower()
                 if game in GAMES:
                     options.game = game
