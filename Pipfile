@@ -26,6 +26,8 @@ aiohttp = "*"
 orjson = "*"
 requests = "*"
 numpy = "*"
+gevent = "*"
+aiodns = "*"
 
 [requires]
 python_version = "3.11"
