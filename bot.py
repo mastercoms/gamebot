@@ -1345,7 +1345,7 @@ class Game:
             "has_initial": self.has_initial,
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
-            "check_delta": self.check_delta,
+            "check_delta": self.check_delta.total_seconds(),
         }
         set_value("saved", data, table=client.backup_table)
 
