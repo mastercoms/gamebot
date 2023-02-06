@@ -511,7 +511,7 @@ class GameClient(discord.Client):
             restored_game.has_initial = save["has_initial"]
             restored_game.was_scheduled = save["was_scheduled"]
             restored_game.base_mention = save["base_mention"]
-            restored_game.check_delta = save.get("check_delta", MAX_CHECK_COUNTDOWN)
+            restored_game.check_delta = datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN)
             self.current_game = restored_game
             self.current_game.start_countdown()
         self.backup_table.truncate()
