@@ -493,27 +493,31 @@ class GameClient(discord.Client):
         save = get_value("saved", table=self.backup_table)
         if save and not self.current_game:
             print_debug("Resuming saved", save)
-            channel = guild.get_channel(save["channel"])
-            author = guild.get_member(save["author"])
-            game_name = save["game_name"]
-            restored_game = Game(channel, author, game_name)
-            restored_game.group_buckets = {
-                int(k): {guild.get_member(m) for m in v}
-                for k, v in save["group_buckets"].items()
-            }
-            restored_game.gamer_buckets = {
-                guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
-            }
-            restored_game.future = datetime.datetime.fromisoformat(save["future"])
-            restored_game.timestamp = save["timestamp"]
-            restored_game.is_checking = save["is_checking"]
-            restored_game.message = await channel.fetch_message(save["message"])
-            restored_game.has_initial = save["has_initial"]
-            restored_game.was_scheduled = save["was_scheduled"]
-            restored_game.base_mention = save["base_mention"]
-            restored_game.check_delta = datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN)
-            self.current_game = restored_game
-            self.current_game.start_countdown()
+            try:
+                channel = guild.get_channel(save["channel"])
+                author = guild.get_member(save["author"])
+                game_name = save["game_name"]
+                restored_game = Game(channel, author, game_name)
+                restored_game.group_buckets = {
+                    int(k): {guild.get_member(m) for m in v}
+                    for k, v in save["group_buckets"].items()
+                }
+                restored_game.gamer_buckets = {
+                    guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
+                }
+                restored_game.future = datetime.datetime.fromisoformat(save["future"])
+                restored_game.timestamp = save["timestamp"]
+                restored_game.is_checking = save["is_checking"]
+                restored_game.message = await channel.fetch_message(save["message"])
+                restored_game.has_initial = save["has_initial"]
+                restored_game.was_scheduled = save["was_scheduled"]
+                restored_game.base_mention = save["base_mention"]
+                restored_game.check_delta = datetime.timedelta(seconds=save["check_delta"])
+                self.current_game = restored_game
+                self.current_game.start_countdown()
+            except Exception as e:
+                print("Failed to restore game.", e)
+                self.current_game = None
         self.backup_table.truncate()
         self.ready = True
         print("Ready.")
