@@ -43,6 +43,7 @@ from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
+from numpy import interp
 
 if os.name == "nt":
     # handle Windows imports
@@ -573,11 +574,11 @@ class GameClient(discord.Client):
                         # check if it's sufficiently in the future
                         if options.future:
                             delta = options.future - self.now
-                            if delta < DEFAULT_DELTA:
+                            if delta < MIN_CHECK_DELTA:
                                 options.future = None
                         # if didn't get a date, default to delta
                         if not options.future:
-                            options.future = self.now + DEFAULT_DELTA
+                            options.future = self.now + MIN_CHECK_DELTA
                         print_debug("Starting game", options.future, gamer)
                         self.current_game = Game(get_channel(message.channel), gamer, options.game)
                         await self.current_game.start(options.future)
@@ -733,9 +734,12 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 BUCKET_MIN: int = 2
 
-DEFAULT_COUNTDOWN = 120.0
-MAX_CHECK_COUNTDOWN = 300.0
-DEFAULT_DELTA = datetime.timedelta(seconds=DEFAULT_COUNTDOWN)
+MIN_CHECK_COUNTDOWN = 2.0 * 60.0
+MAX_CHECK_COUNTDOWN = 5.0 * 60.0
+MIN_CHECK_DELTA = datetime.timedelta(seconds=MIN_CHECK_COUNTDOWN)
+
+MIN_CHECK_SCALING = 10.0 * 60.0
+MAX_CHECK_SCALING = 60.0 * 60.0
 
 
 def increment(val: int) -> int:
@@ -1293,6 +1297,7 @@ class Game:
     has_initial: bool
     was_scheduled: bool | None
     base_mention: str | None
+    check_delta: int | None
 
     def __init__(
         self,
@@ -1315,6 +1320,8 @@ class Game:
 
         self.has_initial = False
         self.was_scheduled = None
+
+        self.check_delta = MIN_CHECK_DELTA
 
     def save(self):
         """
@@ -1372,8 +1379,12 @@ class Game:
         self.future = future
         self.timestamp = generate_timestamp(future)
 
-        countdown = max(DEFAULT_COUNTDOWN, self.get_delta_seconds())
+        countdown = max(MIN_CHECK_COUNTDOWN, self.get_delta_seconds())
         self.is_checking = countdown <= MAX_CHECK_COUNTDOWN
+        if not self.is_checking:
+            mapped = interp(countdown, (MIN_CHECK_SCALING, MAX_CHECK_SCALING), (MIN_CHECK_COUNTDOWN, MAX_CHECK_COUNTDOWN))
+            clamped = max(MIN_CHECK_COUNTDOWN, min(MAX_CHECK_COUNTDOWN, mapped))
+            self.check_delta = datetime.timedelta(seconds=clamped)
         if self.was_scheduled is None:
             self.was_scheduled = not self.is_checking
 
@@ -1461,10 +1472,10 @@ class Game:
             if self.is_checking:
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
-                if 5 < countdown < DEFAULT_COUNTDOWN:
+                if 5 < countdown < MIN_CHECK_COUNTDOWN:
                     print_debug("Refreshing countdown from add_gamer")
                     missing_countdown = datetime.timedelta(
-                        seconds=DEFAULT_COUNTDOWN - self.get_delta_seconds()
+                        seconds=MIN_CHECK_COUNTDOWN - self.get_delta_seconds()
                     )
                     await self.refresh(self.future + missing_countdown)
             else:
@@ -1559,9 +1570,9 @@ class Game:
             else:
                 print_debug("Starting check")
                 # start the game up again
-                client.now = utcnow()
+                client.now = self.future  # this is the time we should have landed on
                 self.reset()
-                check_task = create_task(self.start(client.now + DEFAULT_DELTA, mention=mention))
+                check_task = create_task(self.start(client.now + self.check_delta, mention=mention))
                 return
         else:
             print_debug("No gamers")
