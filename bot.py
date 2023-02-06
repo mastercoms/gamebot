@@ -511,6 +511,7 @@ class GameClient(discord.Client):
             restored_game.has_initial = save["has_initial"]
             restored_game.was_scheduled = save["was_scheduled"]
             restored_game.base_mention = save["base_mention"]
+            restored_game.check_delta = save.get("check_delta", MAX_CHECK_COUNTDOWN)
             self.current_game = restored_game
             self.current_game.start_countdown()
         self.backup_table.truncate()
@@ -1344,6 +1345,7 @@ class Game:
             "has_initial": self.has_initial,
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
+            "check_delta": self.check_delta,
         }
         set_value("saved", data, table=client.backup_table)
 
