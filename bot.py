@@ -479,33 +479,26 @@ class GameClient(discord.Client):
 
         self.lock = asyncio.Lock()
 
-    async def on_ready(self):
-        """
-        Resumes a saved game.
-        """
-        guild = None
-        for guild in self.guilds:
-            break
-        if guild is None:
-            return
-        self.guild = guild
-        self.now = utcnow()
+    async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
         if save and not self.current_game:
             print_debug("Resuming saved", save)
             try:
-                channel = guild.get_channel(save["channel"])
-                author = guild.get_member(save["author"])
+                channel = self.guild.get_channel(save["channel"])
+                author = self.guild.get_member(save["author"])
                 game_name = save["game_name"]
+                future = datetime.datetime.fromisoformat(save["future"])
+                if datetime.datetime.utcnow() - future > datetime.timedelta(minutes=5):
+                    return
                 restored_game = Game(channel, author, game_name)
+                restored_game.future = future
                 restored_game.group_buckets = {
-                    int(k): {guild.get_member(m) for m in v}
+                    int(k): {self.guild.get_member(m) for m in v}
                     for k, v in save["group_buckets"].items()
                 }
                 restored_game.gamer_buckets = {
-                    guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
+                    self.guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
                 }
-                restored_game.future = datetime.datetime.fromisoformat(save["future"])
                 restored_game.timestamp = save["timestamp"]
                 restored_game.is_checking = save["is_checking"]
                 restored_game.message = await channel.fetch_message(save["message"])
@@ -518,6 +511,19 @@ class GameClient(discord.Client):
             except Exception as e:
                 print("Failed to restore game.", e)
                 self.current_game = None
+
+    async def on_ready(self):
+        """
+        Resumes a saved game.
+        """
+        guild = None
+        for guild in self.guilds:
+            break
+        if guild is None:
+            return
+        self.guild = guild
+        self.now = utcnow()
+        await self.restore_backup()
         self.backup_table.truncate()
         self.ready = True
         print("Ready.")
