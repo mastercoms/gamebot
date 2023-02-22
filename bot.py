@@ -488,7 +488,7 @@ class GameClient(discord.Client):
                 author = self.guild.get_member(save["author"])
                 game_name = save["game_name"]
                 future = datetime.datetime.fromisoformat(save["future"])
-                if datetime.datetime.utcnow() - future > datetime.timedelta(minutes=5):
+                if utcnow() - future > datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
                     return
                 restored_game = Game(channel, author, game_name)
                 restored_game.future = future
