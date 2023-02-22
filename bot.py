@@ -1900,6 +1900,9 @@ async def consume_args(
                         except ValueError:
                             # didn't work
                             attempt_date = None
+                        except OverflowError:
+                            # overflowed, get largest date (9999-12-31T23:59:59.999908)
+                            attempt_date = arrow.get(253402300799.9999)
                         # go to next arg
                         end += 1
                         # we made a new date
