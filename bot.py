@@ -532,6 +532,7 @@ class GameClient(discord.ext.commands.Bot):
         """
         await self.restore_backup()
         del_value("saved", table=self.backup_table)
+        await self.restore_backup()
 
     async def handle_game_command(self):
         pass
