@@ -721,7 +721,7 @@ def del_value(key: str, *, table=None):
     Deletes from the key value DB table.
     """
     table_interface = table if table is not None else client.db
-    table_interface.remove(Store.k == key)
+    print_debug(table_interface.remove(Store.k == key))
 
 
 def update_value(update_fn: Callable[[TableType], TableType], key: str, *, default: TableType = None, table=None) -> TableType:
