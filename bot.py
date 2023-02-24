@@ -1878,7 +1878,7 @@ def process_at(
         # combine if space
         if last > end + 1:
             period = args[end + 1].lower()
-            if period.startswith("p") or period.startswith("a"):
+            if period == "pm" or period == "am" or period == "p" or period == "a":
                 word += period
                 end += 1
         local_now = client.now.astimezone(LOCAL_TZINFO)
