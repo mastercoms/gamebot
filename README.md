@@ -40,6 +40,7 @@ In any case, anyone can say:
 * `register <steam account>`: associates a given Steam user to your Discord account for match handling.
 * `option set <key> [value]`: sets an option, or removes it if value not specified (admins only)
 * `option get <key>`: gets an option (admins only)
+* `mark <in/at> <time> and <in/at> <time>`: marks yourself as available for a scheduled game at a given time
 
 ## configuration
 

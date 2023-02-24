@@ -31,7 +31,6 @@ import orjson
 from BetterJSONStorage import BetterJSONStorage
 from discord import Intents, AllowedMentions
 from discord.ext.commands import MemberNotFound
-from discord.app_commands import command
 from httpx_auth import QueryApiKey
 from pytz import timezone
 from steam.steamid import SteamID, from_invite_code, make_steam64
@@ -75,7 +74,7 @@ def create_task(coro, *, name=None):
     return TaskWrapper(task)
 
 
-def get_channel(channel: discord.TextChannel) -> discord.TextChannel:
+def get_channel(channel: discord.TextChannel | None) -> discord.TextChannel:
     settings_channel = get_value("channel_id", table=client.settings_table)
     if settings_channel:
         guild = None
@@ -387,7 +386,7 @@ def preprocess_text(text):
     return text
 
 
-class GameClient(discord.Client):
+class GameClient(discord.ext.commands.Bot):
     """
     The Discord client for this bot.
     """
@@ -412,6 +411,7 @@ class GameClient(discord.Client):
         self._connector: aiohttp.TCPConnector | None = None
 
         self.current_game: Game | None = None
+        self.current_marks: dict[discord.Member, tuple[datetime.datetime, datetime.datetime]] = {}
         self.current_match: DotaMatch | Match | None = None
         self.now: datetime.datetime | None = None
 
@@ -513,9 +513,6 @@ class GameClient(discord.Client):
                 self.current_game = None
 
     async def on_ready(self):
-        """
-        Resumes a saved game.
-        """
         guild = None
         for guild in self.guilds:
             break
@@ -523,22 +520,93 @@ class GameClient(discord.Client):
             return
         self.guild = guild
         self.now = utcnow()
-        await self.restore_backup()
-        self.backup_table.truncate()
+        await self.resume()
         self.ready = True
         print("Ready.")
 
-    async def handle_game_command():
+    async def resume(self):
+        """
+        Resumes a saved game.
+        """
+        await self.restore_backup()
+        self.backup_table.truncate()
+
+    async def handle_game_command(self):
         pass
 
-    async def handle_voiceline_command():
-        pass
+    async def handle_voiceline_command(self, author: discord.Member, channel: discord.TextChannel, content: str):
+        # if in voice
+        voice_state = author.voice
+        if not voice_state or not voice_state.channel:
+            return
+        voice_channel = voice_state.channel
+        if content.lower() == "random voiceline":
+            responses = self.responses_table.all()
+        else:
+            response_text = preprocess_text(content)
+            responses = self.responses_table.search(Response.processed_text == response_text)
+        if len(responses):
+            response = random.choice(responses)
+            link = response["response_link"]
+            file_name = link.split("/")[-1]
+            cache_path = self.responses_cache / file_name
+            tries = 0
+            while True:
+                tries += 1
+                try:
+                    if not cache_path.exists():
+                        with open(cache_path, "wb") as download_file:
+                            async with self.http_client.stream("GET", link) as stream:
+                                async for chunk in stream.aiter_bytes():
+                                    download_file.write(chunk)
+                    if cache_path.stat().st_size < 2048 or not cache_path.exists():
+                        raise ValueError("Corrupted file download")
+                    break
+                except Exception as e:
+                    cache_path.unlink(missing_ok=True)
+                    if tries >= 3:
+                        print("Failed to download voice response:", e)
+                        await get_channel(channel).send("Error: failed to download response, please try again")
+                        return
+                    await asyncio.sleep(get_backoff(tries))
 
-    async def on_app_command_game():
-        pass
+            voice_client: discord.VoiceClient | None = None
+            for voice_client in self.voice_clients:
+                if voice_client.channel == voice_channel:
+                    break
+                if voice_client.guild == voice_channel.guild:
+                    await voice_client.disconnect()
 
-    async def on_app_command_voiceline():
-        pass
+            if not voice_client:
+                self.play_queue.clear()
+                voice_client = await voice_channel.connect(self_deaf=True)
+
+            def play(path: Path):
+                voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda err: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
+
+            async def disconnect():
+                await asyncio.sleep(0.2)
+                if self.play_queue:
+                    path = self.play_queue.pop(0)
+                    play(path)
+                else:
+                    await voice_client.disconnect()
+
+            if voice_client.is_playing() or not voice_client.is_connected():
+                self.play_queue.append(cache_path)
+            else:
+                play(cache_path)
+
+    async def on_app_command_game(self, interaction: discord.Interaction):
+        await self.handle_game_command()
+
+    async def on_app_command_voiceline(self, interaction: discord.Interaction, voiceline: str):
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            channel = get_channel(None)
+        if channel is None:
+            return
+        await self.handle_voiceline_command(interaction.user, channel, voiceline)
 
     def is_valid_message(self, message: discord.Message) -> bool:
         """
@@ -570,6 +638,7 @@ class GameClient(discord.Client):
                     args = message.content.split()[1:]
                     gamer = message.author
                     options = GameOptions()
+                    channel = get_channel(message.channel)
 
                     # consume all args
                     while args:
@@ -579,6 +648,15 @@ class GameClient(discord.Client):
                         # if we cleared options, then we stop here
                         if not options:
                             return
+
+                    # it's a mark command
+                    if options.start:
+                        self.current_marks[gamer] = options.start, options.future
+                        # TODO: handle if
+                        with_str = ""
+                        msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
+                        await channel.send(msg)
+                        return
 
                     # are we going to start a game?
                     if not self.current_game:
@@ -591,73 +669,13 @@ class GameClient(discord.Client):
                         if not options.future:
                             options.future = self.now + MIN_CHECK_DELTA
                         print_debug("Starting game", options.future, gamer)
-                        self.current_game = Game(get_channel(message.channel), gamer, options.game)
+                        self.current_game = Game(channel, gamer, options.game)
                         await self.current_game.start(options.future)
 
                     # add to game
                     await self.current_game.add_gamer(message.author, options.bucket)
             else:
-                # if in voice
-                voice_state = message.author.voice
-                if not voice_state or not voice_state.channel:
-                    return
-                voice_channel = voice_state.channel
-                if message.content.lower() == "random voiceline":
-                    responses = self.responses_table.all()
-                else:
-                    response_text = preprocess_text(message.content)
-                    responses = self.responses_table.search(Response.processed_text == response_text)
-                if len(responses):
-                    response = random.choice(responses)
-                    link = response["response_link"]
-                    file_name = link.split("/")[-1]
-                    cache_path = self.responses_cache / file_name
-                    tries = 0
-                    while True:
-                        tries += 1
-                        try:
-                            if not cache_path.exists():
-                                with open(cache_path, "wb") as download_file:
-                                    async with self.http_client.stream("GET", link) as stream:
-                                        async for chunk in stream.aiter_bytes():
-                                            download_file.write(chunk)
-                            if cache_path.stat().st_size < 2048 or not cache_path.exists():
-                                raise Exception("Corrupted file download")
-                            break
-                        except Exception as e:
-                            cache_path.unlink(missing_ok=True)
-                            if tries >= 3:
-                                print("Failed to download voice response:", e)
-                                await get_channel(message.channel).send("Error: failed to download response, please try again")
-                                return
-                            await asyncio.sleep(get_backoff(tries))
-
-                    voice_client: discord.VoiceClient | None = None
-                    for voice_client in self.voice_clients:
-                        if voice_client.channel == voice_channel:
-                            break
-                        if voice_client.guild == voice_channel.guild:
-                            await voice_client.disconnect()
-
-                    if not voice_client:
-                        self.play_queue.clear()
-                        voice_client = await voice_channel.connect(self_deaf=True)
-
-                    def play(path: Path):
-                        voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda err: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
-
-                    async def disconnect():
-                        await asyncio.sleep(0.2)
-                        if self.play_queue:
-                            path = self.play_queue.pop(0)
-                            play(path)
-                        else:
-                            await voice_client.disconnect()
-
-                    if voice_client.is_playing() or not voice_client.is_connected():
-                        self.play_queue.append(cache_path)
-                    else:
-                        play(cache_path)
+                await self.handle_voiceline_command(message.author, message.channel, message.content)
         except Exception as e:
             print(e)
             await get_channel(message.channel).send("An unexpected error occurred.")
@@ -869,9 +887,12 @@ DOTA_ADV_LABELS = {
     "lh_count": "Last Hits",
     "denies": "Denies",
     "denies_count": "Denies",
-    "hero_damage": "Hero Damage",
+    "hero_damage": "Raw Hero Damage",
+    "scaled_hero_damage": "Hero Damage",
     "tower_damage": "Tower Damage",
-    "hero_healing": "Healing"
+    "scaled_tower_damage": "Real Tower Damage",
+    "hero_healing": "Raw Healing",
+    "scaled_hero_healing": "Healing"
 }
 
 DOTA_EXPECTED_BUILDINGS = [
@@ -1241,9 +1262,9 @@ class DotaMatch(Match):
                 adv_map = {
                     "xp_per_min": 0,
                     "net_worth": 0,
-                    "hero_damage": 0,
+                    "scaled_hero_damage": 0,
                     "tower_damage": 0,
-                    "hero_healing": 0,
+                    "scaled_hero_healing": 0,
                     "last_hits": 0,
                     "denies": 0,
                 }
@@ -1308,7 +1329,7 @@ class Game:
     has_initial: bool
     was_scheduled: bool | None
     base_mention: str | None
-    check_delta: int | None
+    check_delta: datetime.timedelta | None
 
     def __init__(
         self,
@@ -1383,6 +1404,11 @@ class Game:
         self.update_future(future)
         await self.initialize(mention=mention)
         self.save()
+        if not self.is_checking:
+            for gamer, time_period in client.current_marks.items():
+                start, end = time_period
+                if start <= self.future <= end:
+                    await self.add_gamer(gamer, BUCKET_MIN)
 
     def update_future(self, future: datetime.datetime):
         """
@@ -1697,6 +1723,7 @@ class GameOptions:
     """
 
     future: datetime.datetime | None
+    start: datetime.datetime | None
     bucket: int
     game: str | None
 
@@ -1755,6 +1782,155 @@ def try_steam_id(steam_id: str | int) -> SteamID | None:
         return None
 
 
+def process_in(
+        args: list[str]
+) -> datetime.datetime | None:
+    arw = arrow.get(client.now)
+    date_string = "in"
+    end = 0
+    new_start = 0
+    last = len(args)
+    confirmed_date = None
+    # go through until we get a date
+    while True:
+        word = args[end].lower()
+        # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
+        if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
+            i = 0
+            for i, c in enumerate(word):
+                if c not in NUMERIC:
+                    break
+            args.insert(end + 1, word[i:])
+            word = word[:i]
+            last = len(args)
+        if last > end + 1:
+            noun = args[end + 1].lower()
+            # replace shorthand with longform unit, as required by the parser
+            longform_noun = HUMANIZE_SHORTHAND.get(noun)
+            if longform_noun is not None:
+                noun = longform_noun
+                args[end + 1] = noun
+            # using a quantity must require you to use plural units.
+            # if you don't for 1, you must use "a" or "an"
+            if word == "1":
+                if not noun.endswith("s"):
+                    if noun in HUMANIZE_VOWEL_WORDS:
+                        word = "an"
+                    else:
+                        word = "a"
+            else:
+                # if it's a decimal quantity, convert it to the combination of units needed
+                parsed_num = get_float(word, default=None)
+                if parsed_num is not None:
+                    word = convert_humanize_decimal(parsed_num, noun)
+                    # we also consumed the next word
+                    end += 1
+        date_string += " " + word
+        try:
+            attempt_date = arw.dehumanize(date_string, locale="en")
+        except ValueError:
+            # didn't work
+            attempt_date = None
+        except OverflowError:
+            # overflowed, get largest date (9999-12-31T23:59:59.999908)
+            attempt_date = arrow.get(253402300799.9999)
+        # go to next arg
+        end += 1
+        # we made a new date
+        if attempt_date and confirmed_date != attempt_date.datetime:
+            # now we know our new start
+            new_start = end
+            confirmed_date = attempt_date.datetime
+        # if we surpass the last arg, end
+        if end >= last:
+            break
+    # consume our peeked inputs to the date
+    del args[:new_start]
+    return confirmed_date
+
+
+def process_at(
+    args: list[str]
+) -> datetime.datetime | None:
+    date_string = ""
+    end = 0
+    new_start = 0
+    last = len(args)
+    confirmed_date = None
+    # go through until we get a date
+    while True:
+        word = args[end].lower()
+        # combine if space
+        if last > end + 1:
+            period = args[end + 1].lower()
+            if period.startswith("p") or period.startswith("a"):
+                word += period
+                end += 1
+        local_now = client.now.astimezone(LOCAL_TZINFO)
+        # use pm and am, not p or a
+        if word.endswith("p") or word.endswith("a"):
+            word += "m"
+        elif not word.endswith("pm") and not word.endswith("am"):
+            # if there's no period at all, just autodetect based on current
+            # TODO: probably want to detect if the time has past, so we can flip am or pm
+            word += "am" if local_now.hour < 12 else "pm"
+        just_time = word[:-2]
+        # if it's just a single int representing the hour, normalize it into a full time
+        if get_int(just_time, None) is not None:
+            word = just_time + ":00" + word[-2:]
+        date_string += " " + word if date_string else word
+        if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
+            settings = {
+                "TIMEZONE": LOCAL_TIMEZONE,
+                "TO_TIMEZONE": "UTC",
+            }
+            # if UTC time is in the next day, we need to act like we're getting a time in the past
+            # because our local time zone is in the previous day, likewise with future
+            if (
+                    client.now.day > local_now.day
+                    or client.now.month > local_now.month
+                    or client.now.year > local_now.year
+            ):
+                settings["PREFER_DATES_FROM"] = "past"
+            elif (
+                    client.now.day < local_now.day
+                    or client.now.month < local_now.month
+                    or client.now.year < local_now.year
+            ):
+                settings["PREFER_DATES_FROM"] = "future"
+        else:
+            settings = None
+        attempt_date = dateparser.parse(
+            date_string, languages=["en"], settings=settings
+        )
+        # go to next arg
+        end += 1
+        # we made a new date
+        if attempt_date and confirmed_date != attempt_date:
+            # now we know our new start
+            new_start = end
+            confirmed_date = attempt_date
+        # if we surpass the last arg, end
+        if end >= last:
+            break
+    # consume our peeked inputs to the date
+    del args[:new_start]
+    if confirmed_date:
+        if confirmed_date.tzinfo is None:
+            confirmed_date = confirmed_date.replace(
+                tzinfo=TIMESTAMP_TIMEZONE
+            )
+    return confirmed_date
+
+
+def process_time_control(control: str, args: list[str]) -> datetime.datetime | None:
+    if control == "at":
+        return process_at(args)
+    elif control == "in":
+        return process_in(args)
+    return None
+
+
 async def consume_args(
     args: list[str],
     gamer: discord.Member,
@@ -1789,139 +1965,14 @@ async def consume_args(
             # future date handling
             if options.future is None:
                 if control == "at":
-                    date_string = ""
-                    end = 0
-                    new_start = 0
-                    last = len(args)
-                    confirmed_date = None
-                    # go through until we get a date
-                    while True:
-                        word = args[end].lower()
-                        # combine if space
-                        if last > end + 1:
-                            period = args[end + 1].lower()
-                            if period.startswith("p") or period.startswith("a"):
-                                word += period
-                                end += 1
-                        local_now = client.now.astimezone(LOCAL_TZINFO)
-                        # use pm and am, not p or a
-                        if word.endswith("p") or word.endswith("a"):
-                            word += "m"
-                        elif not word.endswith("pm") and not word.endswith("am"):
-                            # if there's no period at all, just autodetect based on current
-                            # TODO: probably want to detect if the time has past, so we can flip am or pm
-                            word += "am" if local_now.hour < 12 else "pm"
-                        just_time = word[:-2]
-                        # if it's just a single int representing the hour, normalize it into a full time
-                        if get_int(just_time, None) is not None:
-                            word = just_time + ":00" + word[-2:]
-                        date_string += " " + word if date_string else word
-                        if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
-                            settings = {
-                                "TIMEZONE": LOCAL_TIMEZONE,
-                                "TO_TIMEZONE": "UTC",
-                            }
-                            # if UTC time is in the next day, we need to act like we're getting a time in the past
-                            # because our local time zone is in the previous day, likewise with future
-                            if (
-                                client.now.day > local_now.day
-                                or client.now.month > local_now.month
-                                or client.now.year > local_now.year
-                            ):
-                                settings["PREFER_DATES_FROM"] = "past"
-                            elif (
-                                client.now.day < local_now.day
-                                or client.now.month < local_now.month
-                                or client.now.year < local_now.year
-                            ):
-                                settings["PREFER_DATES_FROM"] = "future"
-                        else:
-                            settings = None
-                        attempt_date = dateparser.parse(
-                            date_string, languages=["en"], settings=settings
-                        )
-                        # go to next arg
-                        end += 1
-                        # we made a new date
-                        if attempt_date and confirmed_date != attempt_date:
-                            # now we know our new start
-                            new_start = end
-                            confirmed_date = attempt_date
-                        # if we surpass the last arg, end
-                        if end >= last:
-                            break
-                    # consume our peeked inputs to the date
-                    del args[:new_start]
+                    confirmed_date = process_at(args)
                     if confirmed_date:
-                        if confirmed_date.tzinfo is None:
-                            confirmed_date = confirmed_date.replace(
-                                tzinfo=TIMESTAMP_TIMEZONE
-                            )
                         options.future = confirmed_date
                     return options
                 if control == "in":
-                    arw = arrow.get(client.now)
-                    date_string = "in"
-                    end = 0
-                    new_start = 0
-                    last = len(args)
-                    confirmed_date = None
-                    # go through until we get a date
-                    while True:
-                        word = args[end].lower()
-                        # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
-                        if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
-                            i = 0
-                            for i, c in enumerate(word):
-                                if c not in NUMERIC:
-                                    break
-                            args.insert(end + 1, word[i:])
-                            word = word[:i]
-                            last = len(args)
-                        if last > end + 1:
-                            noun = args[end + 1].lower()
-                            # replace shorthand with longform unit, as required by the parser
-                            longform_noun = HUMANIZE_SHORTHAND.get(noun)
-                            if longform_noun is not None:
-                                noun = longform_noun
-                                args[end + 1] = noun
-                            # using a quantity must require you to use plural units.
-                            # if you don't for 1, you must use "a" or "an"
-                            if word == "1":
-                                if not noun.endswith("s"):
-                                    if noun in HUMANIZE_VOWEL_WORDS:
-                                        word = "an"
-                                    else:
-                                        word = "a"
-                            else:
-                                # if it's a decimal quantity, convert it to the combination of units needed
-                                parsed_num = get_float(word, default=None)
-                                if parsed_num is not None:
-                                    word = convert_humanize_decimal(parsed_num, noun)
-                                    # we also consumed the next word
-                                    end += 1
-                        date_string += " " + word
-                        try:
-                            attempt_date = arw.dehumanize(date_string, locale="en")
-                        except ValueError:
-                            # didn't work
-                            attempt_date = None
-                        except OverflowError:
-                            # overflowed, get largest date (9999-12-31T23:59:59.999908)
-                            attempt_date = arrow.get(253402300799.9999)
-                        # go to next arg
-                        end += 1
-                        # we made a new date
-                        if attempt_date and confirmed_date != attempt_date.datetime:
-                            # now we know our new start
-                            new_start = end
-                            confirmed_date = attempt_date.datetime
-                        # if we surpass the last arg, end
-                        if end >= last:
-                            break
-                    # consume our peeked inputs to the date
-                    del args[:new_start]
-                    options.future = confirmed_date
+                    confirmed_date = process_in(args)
+                    if confirmed_date:
+                        options.future = confirmed_date
                     return options
         else:
             if control == "on":
@@ -2005,6 +2056,25 @@ async def consume_args(
         if control == "if":
             options.bucket = get_int(args.pop(0), BUCKET_MIN)
             return options
+        # mark your scheduled availability
+        if control == "mark":
+            time_control = args.pop(0).lower()
+            if time_control == "rm" or time_control == "remove":
+                client.current_marks.pop(gamer, None)
+            start_datetime = process_time_control(time_control, args)
+            if start_datetime and args:
+                sep = args.pop(0).lower()
+                end_datetime = None
+                if sep == "and" and args:
+                    time_control = args.pop(0).lower()
+                    if args:
+                        end_datetime = process_time_control(time_control, args)
+                if end_datetime:
+                    options.start = start_datetime
+                    options.future = end_datetime
+                    return options
+            await channel.send(f"{KEYWORD} mark <in/at> <time> and <in/at> <time>")
+            return None
 
     if control == "status":
         match = client.current_match
@@ -2028,8 +2098,9 @@ async def consume_args(
             await channel.send("No live match found.")
         return None
 
-    # if we didn't find the control, just ignore
-    return options
+    # if we didn't find the control, it's an invalid command
+    await channel.send("Unrecognized input, please check the usage of the command.")
+    return None
 
 
 FUZZ_THRESHOLD = 75
