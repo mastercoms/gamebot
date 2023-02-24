@@ -530,7 +530,7 @@ class GameClient(discord.ext.commands.Bot):
         Resumes a saved game.
         """
         await self.restore_backup()
-        set_value("saved", 0, table=self.backup_table)
+        set_value("saved", {}, table=self.backup_table)
 
     async def handle_game_command(self):
         pass
@@ -1634,7 +1634,7 @@ class Game:
             await self.replace_message("expires", "expired")
         client.current_game = None
         print_debug("Deleting backup table")
-        set_value("saved", 0, table=client.backup_table)
+        set_value("saved", {}, table=client.backup_table)
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
@@ -1665,7 +1665,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_game = None
-        set_value("saved", 0, table=client.backup_table)
+        set_value("saved", {}, table=client.backup_table)
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
@@ -1930,11 +1930,10 @@ def process_at(
             break
     # consume our peeked inputs to the date
     del args[:new_start]
-    if confirmed_date:
-        if confirmed_date.tzinfo is None:
-            confirmed_date = confirmed_date.replace(
-                tzinfo=TIMESTAMP_TIMEZONE
-            )
+    if confirmed_date and confirmed_date.tzinfo is None:
+        confirmed_date = confirmed_date.replace(
+            tzinfo=TIMESTAMP_TIMEZONE
+        )
     return confirmed_date
 
 
@@ -2074,22 +2073,22 @@ async def consume_args(
         # mark your scheduled availability
         if control == "mark":
             time_control = args.pop(0).lower()
-            print_debug(time_control)
+            print_debug(time_control, args)
             if time_control == "rm" or time_control == "remove":
                 client.current_marks.pop(gamer, None)
                 return None
             start_datetime = process_time_control(time_control, args)
-            print_debug(start_datetime)
+            print_debug(start_datetime, args)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
-                print_debug(sep)
+                print_debug(sep, args)
                 if sep == "and" and args:
                     time_control = args.pop(0).lower()
-                    print_debug(time_control)
+                    print_debug(time_control, args)
                     if args:
                         end_datetime = process_time_control(time_control, args)
-                        print_debug(end_datetime)
+                        print_debug(end_datetime, args)
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
