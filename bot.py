@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gevent.monkey
-from tinydb.operations import delete
 
 gevent.monkey.patch_socket()
 gevent.monkey.patch_ssl()
@@ -531,8 +530,7 @@ class GameClient(discord.ext.commands.Bot):
         Resumes a saved game.
         """
         await self.restore_backup()
-        del_value("saved", table=self.backup_table)
-        await self.restore_backup()
+        set_value("saved", 0, table=self.backup_table)
 
     async def handle_game_command(self):
         pass
@@ -686,7 +684,6 @@ class GameClient(discord.ext.commands.Bot):
 
 client: GameClient | None = None
 
-Setting = Query()
 Player = Query()
 Store = Query()
 Response = Query()
@@ -1637,7 +1634,7 @@ class Game:
             await self.replace_message("expires", "expired")
         client.current_game = None
         print_debug("Deleting backup table")
-        del_value("saved", table=client.backup_table)
+        set_value("saved", 0, table=client.backup_table)
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
@@ -1668,7 +1665,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_game = None
-        del_value("saved", table=client.backup_table)
+        set_value("saved", 0, table=client.backup_table)
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
@@ -1806,6 +1803,9 @@ def process_in(
     # go through until we get a date
     while True:
         word = args[end].lower()
+        # and is a separator
+        if word == "and":
+            break
         # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
         if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
             i = 0
@@ -1872,6 +1872,9 @@ def process_at(
     # go through until we get a date
     while True:
         word = args[end].lower()
+        # and is a separator
+        if word == "and":
+            break
         # combine if space
         if last > end + 1:
             period = args[end + 1].lower()
@@ -2059,7 +2062,7 @@ async def consume_args(
                     set_value(option, new_value, table=client.settings_table)
                     await channel.send(f"{option}={new_value}")
                 else:
-                    client.settings_table.remove(Setting.k == option)
+                    del_value(option, table=client.settings_table)
                     await channel.send(f"{option}=null")
             else:
                 await channel.send(f"{option}={get_value(option, table=client.settings_table)}")
