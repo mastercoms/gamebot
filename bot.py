@@ -2070,16 +2070,22 @@ async def consume_args(
         # mark your scheduled availability
         if control == "mark":
             time_control = args.pop(0).lower()
+            print_debug(time_control)
             if time_control == "rm" or time_control == "remove":
                 client.current_marks.pop(gamer, None)
+                return None
             start_datetime = process_time_control(time_control, args)
+            print_debug(start_datetime)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
+                print_debug(sep)
                 if sep == "and" and args:
                     time_control = args.pop(0).lower()
+                    print_debug(time_control)
                     if args:
                         end_datetime = process_time_control(time_control, args)
+                        print_debug(end_datetime)
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
