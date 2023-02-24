@@ -1743,6 +1743,7 @@ class GameOptions:
         Initializes a blank/default options.
         """
         self.future = None
+        self.start = None
         self.game = None
         self.bucket = BUCKET_MIN
 
