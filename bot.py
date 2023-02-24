@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import gevent.monkey
+from tinydb.operations import delete
+
 gevent.monkey.patch_socket()
 gevent.monkey.patch_ssl()
 gevent.monkey.patch_dns()
@@ -529,7 +531,7 @@ class GameClient(discord.ext.commands.Bot):
         Resumes a saved game.
         """
         await self.restore_backup()
-        self.backup_table.truncate()
+        del_value("saved", table=self.backup_table)
 
     async def handle_game_command(self):
         pass
@@ -712,6 +714,14 @@ def set_value(key: str, val: TableType, *, table=None):
     """
     table_interface = table if table is not None else client.db
     table_interface.upsert({"k": key, "v": val}, Store.k == key)
+
+
+def del_value(key: str, *, table=None):
+    """
+    Deletes from the key value DB table.
+    """
+    table_interface = table if table is not None else client.db
+    table_interface.remove(Store.k == key)
 
 
 def update_value(update_fn: Callable[[TableType], TableType], key: str, *, default: TableType = None, table=None) -> TableType:
@@ -1625,8 +1635,8 @@ class Game:
             # make it past tense
             await self.replace_message("expires", "expired")
         client.current_game = None
-        print_debug("Truncating backup table")
-        client.backup_table.truncate()
+        print_debug("Deleting backup table")
+        del_value("saved", table=client.backup_table)
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
@@ -1657,7 +1667,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_game = None
-        client.backup_table.truncate()
+        del_value("saved", table=client.backup_table)
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
