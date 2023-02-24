@@ -2157,6 +2157,7 @@ async def main(debug, no_2fa):
             debug=debug,
             no_2fa=no_2fa,
             max_messages=500,
+            command_prefix=KEYWORD,
             intents=intents,
             allowed_mentions=mentions,
         )
