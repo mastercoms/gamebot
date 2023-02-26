@@ -412,7 +412,9 @@ class GameClient(discord.ext.commands.Bot):
         self._connector: aiohttp.TCPConnector | None = None
 
         self.current_game: Game | None = None
-        self.current_marks: dict[discord.Member, tuple[datetime.datetime, datetime.datetime]] = {}
+        self.current_marks: dict[str, dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]]] = {}
+        for game in GAMES:
+            self.current_marks[game] = {}
         self.current_match: DotaMatch | Match | None = None
         self.now: datetime.datetime | None = None
 
@@ -651,10 +653,13 @@ class GameClient(discord.ext.commands.Bot):
                             return
 
                     # it's a mark command
-                    if options.start:
-                        self.current_marks[gamer] = options.start, options.future
-                        # TODO: handle if
-                        with_str = ""
+                    if options.remove_mark:
+                        self.current_marks[options.game].pop(gamer, None)
+                        return
+                    elif options.start:
+                        self.current_marks[options.game][gamer] = options.start, options.future, options.bucket
+                        min_bucket, max_bucket = get_bucket_bounds(options.bucket, options.game)
+                        with_str = get_bucket_str(min_bucket)
                         msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
                         await channel.send(msg)
                         return
@@ -672,9 +677,10 @@ class GameClient(discord.ext.commands.Bot):
                         print_debug("Starting game", options.future, gamer)
                         self.current_game = Game(channel, gamer, options.game)
                         await self.current_game.start(options.future)
-
-                    # add to game
-                    await self.current_game.add_gamer(message.author, options.bucket)
+                        await self.current_game.add_initials(gamer, options.bucket)
+                    else:
+                        # add to game
+                        await self.current_game.add_gamer(gamer, options.bucket)
             else:
                 await self.handle_voiceline_command(message.author, message.channel, message.content)
         except Exception as e:
@@ -988,14 +994,15 @@ class DotaMatch(Match):
 
         # request spectate for steam server ID
         client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": make_steam64(self.account_id)
+            "steam_id": make_steam64(self.account_id),
+            "live": False
         })
 
         print_debug(f"Querying realtime match stats for {self.account_id}...")
 
         def handle_resp(message):
-            live_result = message.watch_live_result if message else 0
             server_steamid = message.server_steamid if message else 0
+            live_result = message.watch_live_result if message else 1
             print_debug(f"Got spectate response! {live_result} {server_steamid}")
             if server_steamid == "0":
                 server_steamid = None
@@ -1222,7 +1229,7 @@ class DotaMatch(Match):
         await asyncio.sleep(self.get_poll_interval())
         match = await self.get_recent_match()
         self.polls += 1
-        print_debug(f"match: {match}")
+        print_debug(f"Match: {match}")
         if match:
             team_num = match["player_team"]
             is_dire = team_num == 1
@@ -1317,6 +1324,25 @@ class DotaMatch(Match):
             self.start_check()
         else:
             client.current_match = None
+            print_debug(f"Current match ended")
+
+
+def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
+    game_min = GAME_DATA[game_name].get("min", BUCKET_MIN)
+    game_max = GAME_DATA[game_name].get("max", game_min)
+
+    # out of bounds buckets
+    min_bucket = max(game_min, min(min_bucket, game_max))
+
+    return min_bucket, game_max
+
+
+def get_bucket_str(min_bucket: int) -> str:
+    return (
+        f" with {min_bucket} {KEYWORD}{KEYWORD_SUBJECT_SUFFIX}"
+        if min_bucket > BUCKET_MIN
+        else ""
+    )
 
 
 class Game:
@@ -1412,11 +1438,15 @@ class Game:
         self.update_future(future)
         await self.initialize(mention=mention)
         self.save()
+
+    async def add_initials(self, author: discord.Member, bucket: int):
+        await self.add_gamer(author, bucket)
         if not self.is_checking:
-            for gamer, time_period in client.current_marks.items():
-                start, end = time_period
+            game_marks = client.current_marks[self.game_name]
+            for gamer, params in game_marks.items():
+                start, end, min_bucket = params
                 if start <= self.future <= end:
-                    await self.add_gamer(gamer, BUCKET_MIN)
+                    await self.add_gamer(gamer, min_bucket)
 
     def update_future(self, future: datetime.datetime):
         """
@@ -1486,12 +1516,8 @@ class Game:
         """
         Sets a gamer to the specified buckets.
         """
-        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
-        game_max = GAME_DATA[self.game_name].get("max", game_min)
-        bucket_range_max = game_max + 1
-
-        # out of bounds buckets
-        min_bucket = max(game_min, min(min_bucket, game_max))
+        min_bucket, max_bucket = get_bucket_bounds(min_bucket, self.game_name)
+        bucket_range_max = max_bucket + 1
 
         # remove them first if this is an update
         current_min_bucket = self.gamer_buckets.get(gamer)
@@ -1510,11 +1536,7 @@ class Game:
             name = gamer.display_name
             size = len(self.gamer_buckets)
             size = f"**({size}/5)**"
-            with_str = (
-                f" with {min_bucket} {KEYWORD}{KEYWORD_SUBJECT_SUFFIX}"
-                if min_bucket > BUCKET_MIN
-                else ""
-            )
+            with_str = get_bucket_str(min_bucket)
             if self.is_checking:
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
@@ -1587,8 +1609,7 @@ class Game:
         """
         gamers = self.get_gamers()
         num_gamers = len(gamers)
-        print_debug("Finishing", gamers)
-        print_debug("Finishing", GAME_DATA[self.game_name])
+        print_debug("Finishing", gamers, GAME_DATA[self.game_name])
         if num_gamers >= GAME_DATA[self.game_name].get("min", BUCKET_MIN):
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
@@ -1732,6 +1753,7 @@ class GameOptions:
 
     future: datetime.datetime | None
     start: datetime.datetime | None
+    remove_mark: bool
     bucket: int
     game: str | None
 
@@ -1741,6 +1763,7 @@ class GameOptions:
         """
         self.future = None
         self.start = None
+        self.remove_mark = False
         self.game = None
         self.bucket = BUCKET_MIN
 
@@ -1918,7 +1941,6 @@ def process_at(
         attempt_date = dateparser.parse(
             date_string, languages=["en"], settings=settings
         )
-        print_debug(date_string, attempt_date)
         # go to next arg
         end += 1
         # we made a new date
@@ -2074,22 +2096,17 @@ async def consume_args(
         # mark your scheduled availability
         if control == "mark":
             time_control = args.pop(0).lower()
-            print_debug(time_control, args)
             if time_control == "rm" or time_control == "remove":
-                client.current_marks.pop(gamer, None)
-                return None
+                options.remove_mark = True
+                return options
             start_datetime = process_time_control(time_control, args)
-            print_debug(start_datetime, args)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
-                print_debug(sep, args)
                 if sep == "and" and args:
                     time_control = args.pop(0).lower()
-                    print_debug(time_control, args)
                     if args:
                         end_datetime = process_time_control(time_control, args)
-                        print_debug(end_datetime, args)
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
