@@ -482,9 +482,13 @@ class GameClient(discord.ext.commands.Bot):
 
         self.lock = asyncio.Lock()
 
+    def clear_backup(self):
+        print_debug("Deleting backup table")
+        set_value("saved", {"active": False}, table=self.backup_table)
+
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
-        if save and not self.current_game:
+        if save and not self.current_game and save.get("active"):
             print_debug("Resuming saved", save)
             try:
                 channel = self.guild.get_channel(save["channel"])
@@ -515,6 +519,12 @@ class GameClient(discord.ext.commands.Bot):
                 print("Failed to restore game.", e)
                 self.current_game = None
 
+    def restore_marks(self):
+        marks = get_value("marks", table=self.backup_table)
+        for game, game_marks in marks.items():
+            for gamer_id, params in game_marks:
+                self.current_marks[game][self.guild.get_member(gamer_id)] = params[0], params[1], params[2]
+
     async def on_ready(self):
         guild = None
         for guild in self.guilds:
@@ -529,10 +539,11 @@ class GameClient(discord.ext.commands.Bot):
 
     async def resume(self):
         """
-        Resumes a saved game.
+        Resumes from backups.
         """
+        self.restore_marks()
         await self.restore_backup()
-        set_value("saved", {}, table=self.backup_table)
+        self.clear_backup()
 
     async def handle_game_command(self):
         pass
@@ -654,10 +665,21 @@ class GameClient(discord.ext.commands.Bot):
 
                     # it's a mark command
                     if options.remove_mark:
-                        self.current_marks[options.game].pop(gamer, None)
+                        if self.current_marks[options.game].pop(gamer, None):
+                            def clean_mark(old):
+                                old[options.game].pop(gamer.id, None)
+                                return old
+
+                            update_value(clean_mark, "marks", table=client.backup_table)
                         return
                     elif options.start:
                         self.current_marks[options.game][gamer] = options.start, options.future, options.bucket
+                        saved_marks = {}
+                        for game, game_marks in self.current_marks.items():
+                            for gamer, params in game_marks.items():
+                                start, future, min_bucket = params
+                                saved_marks[game][gamer.id] = [start.isoformat(), future.isoformat(), min_bucket]
+                        set_value("marks", saved_marks, table=client.backup_table)
                         min_bucket, max_bucket = get_bucket_bounds(options.bucket, options.game)
                         with_str = get_bucket_str(min_bucket)
                         msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
@@ -1411,6 +1433,7 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
+            "active": True
         }
         set_value("saved", data, table=client.backup_table)
 
@@ -1654,8 +1677,7 @@ class Game:
             # make it past tense
             await self.replace_message("expires", "expired")
         client.current_game = None
-        print_debug("Deleting backup table")
-        set_value("saved", {}, table=client.backup_table)
+        client.clear_backup()
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
@@ -1686,7 +1708,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_game = None
-        set_value("saved", {}, table=client.backup_table)
+        client.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
