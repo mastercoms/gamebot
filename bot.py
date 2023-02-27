@@ -487,7 +487,6 @@ class GameClient(discord.ext.commands.Bot):
         save = get_value("saved", table=self.backup_table)
         if not save or self.current_game or self.current_match or not save.get("active"):
             return
-        print_debug("Resuming saved", save)
         try:
             channel = self.guild.get_channel(save["channel"])
             author = self.guild.get_member(save["author"])
@@ -495,6 +494,7 @@ class GameClient(discord.ext.commands.Bot):
             future = datetime.datetime.fromisoformat(save["future"])
             if utcnow() - future > datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
                 return
+            print_debug("Resuming saved", save)
             restored_game = Game(channel, author, game_name)
             restored_game.future = future
             restored_game.group_buckets = {
@@ -521,11 +521,11 @@ class GameClient(discord.ext.commands.Bot):
         save = get_value("match", table=self.backup_table)
         if not save or self.current_game or self.current_match or not save.get("active"):
             return
-        print_debug("Resuming match", save)
         try:
             timestamp = save["timestamp"]
             if utcnow() - timestamp >= datetime.timedelta(seconds=MATCH_MAX_POLL_LENGTH):
                 return
+            print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
             gamers = set([self.guild.get_member(gamer_id) for gamer_id in save["gamers"]])
             channel = self.guild.get_channel(save["channel"])
