@@ -159,11 +159,11 @@
         },
         "asyncio-gevent": {
             "hashes": [
-                "sha256:21df1f897c260aae5198ef4eaf6902202f52b4c084ab64a559cdfa467c20e01b",
-                "sha256:a6db1bae678114a11c38ccee1ac8c6bdd8d0ae658ae2a536da9400e292cb9067"
+                "sha256:35135b323a4d4804cbaa2888fd3bcbcc23cddce358a1b4234641efb6c58b6248",
+                "sha256:d0f581b61fd648f784c9bacdcfa7d6b585aa6efc5cb8c399301857cc10150f7e"
             ],
             "index": "pypi",
-            "version": "==0.2.0"
+            "version": "==0.2.3"
         },
         "attrs": {
             "hashes": [
@@ -1625,7 +1625,7 @@
                 "sha256:125d96d20c92b946b983d0d392b84ff945461e5a06d3867e9f9e575f8697b67f",
                 "sha256:8aa57747f3fc3e977684f0176a88e789be314a99f99b43b75d1e9cb5dc6db9e9"
             ],
-            "markers": "python_version >= '3.7'",
+            "markers": "python_full_version >= '3.7.0'",
             "version": "==13.3.1"
         },
         "setuptools": {
@@ -1702,7 +1702,7 @@
                 "sha256:2b88858b0e3120792a3c0635c23daf36a7d7eeeca657c323da299d2094402a0d",
                 "sha256:fe5f866eddd8b96e9fcba978f8e503c909b19ea7efda11e52e39494bad3a7bfa"
             ],
-            "markers": "platform_system == 'Windows'",
+            "markers": "python_version >= '3.6'",
             "version": "==2022.7"
         },
         "tzlocal": {
@@ -1754,6 +1754,7 @@
                 "sha256:f1e507c9ee39c61bfddd79714e4f85900656db1aec4d40c6de55648e85c2799c",
                 "sha256:ff3d00b70ce95adce264462c930fbaecb29718ba6563db354608f37e49e09024"
             ],
+            "index": "pypi",
             "markers": "sys_platform != 'win32'",
             "version": "==0.17.0"
         },
