@@ -679,6 +679,7 @@ class GameClient(discord.ext.commands.Bot):
                         self.current_marks[options.game][gamer] = options.start, options.future, options.bucket
                         saved_marks = {}
                         for game, game_marks in self.current_marks.items():
+                            saved_marks[game] = {}
                             for gamer, params in game_marks.items():
                                 start, future, min_bucket = params
                                 saved_marks[game][gamer.id] = [start.isoformat(), future.isoformat(), min_bucket]
