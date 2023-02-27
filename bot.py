@@ -429,6 +429,7 @@ class GameClient(discord.ext.commands.Bot):
         self.db = TinyDB(
             Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
         )
+        print(str(self.db))
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
@@ -482,13 +483,9 @@ class GameClient(discord.ext.commands.Bot):
 
         self.lock = asyncio.Lock()
 
-    def clear_backup(self):
-        print_debug("Deleting backup table")
-        set_value("saved", {"active": False}, table=self.backup_table)
-
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
-        if not save or self.current_game or not save.get("active"):
+        if not save or self.current_game or self.current_match or not save.get("active"):
             return
         print_debug("Resuming saved", save)
         try:
@@ -520,6 +517,26 @@ class GameClient(discord.ext.commands.Bot):
             print("Failed to restore game.", repr(e))
             self.current_game = None
 
+    async def restore_match(self):
+        save = get_value("match", table=self.backup_table)
+        if not save or self.current_game or self.current_match or not save.get("active"):
+            return
+        print_debug("Resuming match", save)
+        try:
+            timestamp = save["timestamp"]
+            if utcnow() - timestamp >= datetime.timedelta(seconds=MATCH_MAX_POLL_LENGTH):
+                return
+            channel = self.guild.get_channel(save["channel"])
+            gamers = set([self.guild.get_member(gamer_id) for gamer_id in save["gamers"]])
+            account_ids = set(save["account_ids"])
+            restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
+            restored_match.known_matches = save["known_matches"]
+            self.current_match = restored_match
+            self.current_match.start_check()
+        except Exception as e:
+            print("Failed to restore match.", repr(e))
+            self.current_match = None
+
     def restore_marks(self):
         marks = get_value("marks", table=self.backup_table)
         if not marks:
@@ -545,8 +562,8 @@ class GameClient(discord.ext.commands.Bot):
         Resumes from backups.
         """
         self.restore_marks()
+        await self.restore_match()
         await self.restore_backup()
-        self.clear_backup()
 
     async def handle_game_command(self):
         pass
@@ -822,7 +839,8 @@ MATCH_POLL_INTERVALS = [10 * 60, 5 * 60, 5 * 60, 1.5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_FIRST = MATCH_POLL_INTERVALS[0]
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
-MATCH_MAX_POLLS = 2 * 60 * 60 // MATCH_POLL_INTERVAL_LAST
+MATCH_MAX_POLL_LENGTH = 2 * 60 * 60
+MATCH_MAX_POLLS = MATCH_MAX_POLL_LENGTH// MATCH_POLL_INTERVAL_LAST
 MATCH_WAIT_TIME = 60
 
 
@@ -965,9 +983,11 @@ class DotaMatch(Match):
     timestamp: int
     polls: int
     channel: discord.TextChannel
+    serialize: bool
     task: TaskWrapper | None
 
-    def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True):
+    def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True, serialize: bool = False):
+        self.serialize = serialize
         self.account_ids = account_ids
         friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
         friend_ids = [friend_id.account_id for friend_id in friend_ids if
@@ -978,15 +998,35 @@ class DotaMatch(Match):
         self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(account_ids)
-        self.update_timestamp()
         self.polls = 0
         self.channel = channel
+        self.update_timestamp()
         self.task = None
         if should_check:
             self.start_check()
 
+    def save(self):
+        """
+        Saves the Match to disk, so that it may be resumed in case of a crash/update/restart.
+
+        Must be called any time any of the class properties change.
+        """
+        if not self.serialize:
+            return
+        data = {
+            "known_matches": list(self.known_matches),
+            "account_ids": list(self.account_ids),
+            "gamer_ids": list(self.gamer_ids),
+            "timestamp": self.timestamp,
+            "polls": self.polls,
+            "channel": self.channel.id,
+            "active": True
+        }
+        set_value("match", data, table=client.backup_table)
+
     def update_timestamp(self):
         self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST))
+        self.save()
 
     def start_check(self):
         self.task = create_task(self.check_match(), name="Match Check")
@@ -1263,8 +1303,8 @@ class DotaMatch(Match):
             match_id = match["match_id"]
 
             # reset to keep looking for games
-            self.update_timestamp()
             self.polls = 0
+            self.update_timestamp()
 
             # wait for match details to be available
             await asyncio.sleep(MATCH_WAIT_TIME)
@@ -1345,6 +1385,8 @@ class DotaMatch(Match):
             else:
                 if EXTRA_LOSS_MESSAGE:
                     await self.channel.send(EXTRA_LOSS_MESSAGE)
+        else:
+            self.save()
         if self.polls < MATCH_MAX_POLLS:
             self.start_check()
         else:
@@ -1439,6 +1481,10 @@ class Game:
             "active": True
         }
         set_value("saved", data, table=client.backup_table)
+
+    def clear_backup(self):
+        print_debug("Deleting backup table")
+        set_value("saved", {"active": False}, table=client.backup_table)
 
     def reset(self):
         """
@@ -1680,7 +1726,7 @@ class Game:
             # make it past tense
             await self.replace_message("expires", "expired")
         client.current_game = None
-        client.clear_backup()
+        self.clear_backup()
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
@@ -1711,7 +1757,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         client.current_game = None
-        client.clear_backup()
+        self.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
 
     async def advance(self, now: datetime.datetime):
@@ -2153,7 +2199,7 @@ async def consume_args(
                 player = client.players_table.get(Player.id == member.id)
                 if player:
                     account_id = player["steam"]
-                    match = DotaMatch({account_id}, {member}, channel, should_check=False)
+                    match = DotaMatch({account_id}, {member}, channel, should_check=False, serialize=False)
         if match and client.steamapi:
             async with channel.typing():
                 match.query_realtime(channel, gamer.id)
