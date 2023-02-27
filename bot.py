@@ -709,7 +709,7 @@ class GameClient(discord.ext.commands.Bot):
             else:
                 await self.handle_voiceline_command(message.author, message.channel, message.content)
         except Exception as e:
-            print(e)
+            print("Unexpected error:", e)
             await get_channel(message.channel).send("An unexpected error occurred.")
 
 
@@ -742,7 +742,7 @@ def set_value(key: str, val: TableType, *, table=None):
     Sets to the key value DB table.
     """
     table_interface = table if table is not None else client.db
-    print_debug(key, val, table_interface.upsert({"k": key, "v": val}, Store.k == key))
+    print_debug("set", key, val, table_interface.upsert({"k": key, "v": val}, Store.k == key))
 
 
 def del_value(key: str, *, table=None):
@@ -750,7 +750,7 @@ def del_value(key: str, *, table=None):
     Deletes from the key value DB table.
     """
     table_interface = table if table is not None else client.db
-    print_debug(key, table_interface.remove(Store.k == key))
+    print_debug("del", key, table_interface.remove(Store.k == key))
 
 
 def update_value(update_fn: Callable[[TableType], TableType], key: str, *, default: TableType = None, table=None) -> TableType:
@@ -1047,7 +1047,6 @@ class DotaMatch(Match):
                             return
                         wait_backoff(tries)
                 match = resp["match"]
-                print_debug(match)
                 teams = resp.get("teams")
                 team_id = 0
 
