@@ -526,11 +526,12 @@ class GameClient(discord.ext.commands.Bot):
             timestamp = save["timestamp"]
             if utcnow() - timestamp >= datetime.timedelta(seconds=MATCH_MAX_POLL_LENGTH):
                 return
-            channel = self.guild.get_channel(save["channel"])
-            gamers = set([self.guild.get_member(gamer_id) for gamer_id in save["gamers"]])
             account_ids = set(save["account_ids"])
+            gamers = set([self.guild.get_member(gamer_id) for gamer_id in save["gamers"]])
+            channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.known_matches = save["known_matches"]
+            restored_match.timestamp = timestamp
             self.current_match = restored_match
             self.current_match.start_check()
         except Exception as e:
@@ -1391,6 +1392,7 @@ class DotaMatch(Match):
             self.start_check()
         else:
             client.current_match = None
+            set_value("match", {"active": False}, table=client.backup_table)
             print_debug(f"Current match ended")
 
 
