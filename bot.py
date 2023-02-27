@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gevent
+gevent.config.loop = "libuv"
+
 import gevent.monkey
 
 gevent.monkey.patch_socket()
@@ -55,10 +58,9 @@ else:
     # handle POSIX imports
     # for uvloop
     # while we have steam client, we cannot use uvloop due to gevent
-    if False:
-        import uvloop
+    import uvloop
 
-        uvloop.install()
+    uvloop.install()
 
 asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 
@@ -87,7 +89,7 @@ def get_channel(channel: discord.TextChannel | None) -> discord.TextChannel:
 
 
 MAX_BACKOFF = 2.0
-BASE_BACKOFF = 0.005
+BASE_BACKOFF = 0.016
 
 
 def get_backoff(failures: int) -> float:
@@ -429,7 +431,6 @@ class GameClient(discord.ext.commands.Bot):
         self.db = TinyDB(
             Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
         )
-        print(str(self.db))
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
