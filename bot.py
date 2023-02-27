@@ -238,7 +238,7 @@ class DotaAPI:
                 break
             except Exception as e:
                 if tries >= 3:
-                    print("Failed to get match details:", e)
+                    print("Failed to get match details:", repr(e))
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"]["matches"]
@@ -263,7 +263,7 @@ class DotaAPI:
                 break
             except Exception as e:
                 if tries >= 10:
-                    print("Failed to get match details:", e)
+                    print("Failed to get match details:", repr(e))
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"]
@@ -517,7 +517,7 @@ class GameClient(discord.ext.commands.Bot):
             self.current_game = restored_game
             self.current_game.start_countdown()
         except Exception as e:
-            print("Failed to restore game.", e)
+            print("Failed to restore game.", repr(e))
             self.current_game = None
 
     def restore_marks(self):
@@ -582,7 +582,7 @@ class GameClient(discord.ext.commands.Bot):
                 except Exception as e:
                     cache_path.unlink(missing_ok=True)
                     if tries >= 3:
-                        print("Failed to download voice response:", e)
+                        print("Failed to download voice response:", repr(e))
                         await get_channel(channel).send("Error: failed to download response, please try again")
                         return
                     await asyncio.sleep(get_backoff(tries))
@@ -709,7 +709,7 @@ class GameClient(discord.ext.commands.Bot):
             else:
                 await self.handle_voiceline_command(message.author, message.channel, message.content)
         except Exception as e:
-            print("Unexpected error:", e)
+            print("Unexpected error:", repr(e))
             await get_channel(message.channel).send("An unexpected error occurred.")
 
 
@@ -1042,7 +1042,7 @@ class DotaMatch(Match):
                         break
                     except Exception as e:
                         if tries >= 10:
-                            print("Failed to get realtime stats:", e)
+                            print("Failed to get realtime stats:", repr(e))
                             msg_task = create_task(channel.send("Match not started yet."))
                             return
                         wait_backoff(tries)
@@ -1393,13 +1393,13 @@ class Game:
         self,
         channel: discord.TextChannel,
         author: discord.Member,
-        game_name: str = None,
+        game_name: str,
     ):
         """
         Creates a new Game, to be started with start().
         """
         print_debug("Created new game")
-        self.game_name = game_name if game_name else DEFAULT_GAME
+        self.game_name = game_name
 
         self.reset()
 
@@ -1779,7 +1779,7 @@ class GameOptions:
     start: datetime.datetime | None
     remove_mark: bool
     bucket: int
-    game: str | None
+    game: str
 
     def __init__(self):
         """
@@ -1788,7 +1788,7 @@ class GameOptions:
         self.future = None
         self.start = None
         self.remove_mark = False
-        self.game = None
+        self.game = DEFAULT_GAME
         self.bucket = BUCKET_MIN
 
 
