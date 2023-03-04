@@ -1961,6 +1961,9 @@ def process_in(
 def process_at(
     args: list[str]
 ) -> datetime.datetime | None:
+    # process relative time for at
+    if args[0] == "now":
+        return process_in(args)
     date_string = ""
     end = 0
     new_start = 0
