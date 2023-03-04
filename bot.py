@@ -545,7 +545,7 @@ class GameClient(discord.ext.commands.Bot):
             return
         for game, game_marks in marks.items():
             for gamer_id, params in game_marks:
-                self.current_marks[game][self.guild.get_member(gamer_id)] = params[0], params[1], params[2]
+                self.current_marks[game][self.guild.get_member(int(gamer_id))] = params[0], params[1], params[2]
 
     async def on_ready(self):
         guild = None
@@ -689,7 +689,7 @@ class GameClient(discord.ext.commands.Bot):
                     if options.remove_mark:
                         if self.current_marks[options.game].pop(gamer, None):
                             def clean_mark(old):
-                                old[options.game].pop(gamer.id, None)
+                                old[options.game].pop(str(gamer.id), None)
                                 return old
 
                             update_value(clean_mark, "marks", table=client.backup_table)
@@ -701,7 +701,7 @@ class GameClient(discord.ext.commands.Bot):
                             saved_marks[game] = {}
                             for marker, params in game_marks.items():
                                 start, future, min_bucket = params
-                                saved_marks[game][marker.id] = [start.isoformat(), future.isoformat(), min_bucket]
+                                saved_marks[game][str(marker.id)] = [start.isoformat(), future.isoformat(), min_bucket]
                         set_value("marks", saved_marks, table=client.backup_table)
                         min_bucket, max_bucket = get_bucket_bounds(options.bucket, options.game)
                         with_str = get_bucket_str(min_bucket)
