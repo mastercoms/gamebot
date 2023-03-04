@@ -1893,6 +1893,7 @@ def process_in(
 ) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
+        args.pop(0)
         return utcnow()
     arw = arrow.get(client.now)
     date_string = "in"
@@ -1966,6 +1967,7 @@ def process_at(
 ) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
+        args.pop(0)
         return utcnow()
     date_string = ""
     end = 0
