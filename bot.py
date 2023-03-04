@@ -1891,6 +1891,9 @@ def try_steam_id(steam_id: str | int) -> SteamID | None:
 def process_in(
         args: list[str]
 ) -> datetime.datetime | None:
+    # process now
+    if args[0] == "now":
+        return utcnow()
     arw = arrow.get(client.now)
     date_string = "in"
     end = 0
@@ -1961,9 +1964,9 @@ def process_in(
 def process_at(
     args: list[str]
 ) -> datetime.datetime | None:
-    # process relative time for at
+    # process now
     if args[0] == "now":
-        return process_in(args)
+        return utcnow()
     date_string = ""
     end = 0
     new_start = 0
