@@ -2359,7 +2359,7 @@ if __name__ == "__main__":
     if PROFILING:
         import yappi
         yappi.set_context_backend("greenlet")
-        yappi.set_clock_type("wall")
+        yappi.set_clock_type("cpu")
         yappi.start(builtins=True)
     start_bot(False, True)
     if PROFILING:
