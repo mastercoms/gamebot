@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import yappi
-
 import gevent
 gevent.config.loop = "libuv"
 
@@ -2354,9 +2352,16 @@ def start_bot(debug, no_2fa):
     asyncio.run(main(debug, no_2fa))
 
 
+PROFILING = False
+
 if __name__ == "__main__":
     # TODO: arg parse
-    yappi.set_context_backend("greenlet")
-    yappi.set_clock_type("wall")
-    yappi.start(builtins=True)
+    if PROFILING:
+        import yappi
+        yappi.set_context_backend("greenlet")
+        yappi.set_clock_type("wall")
+        yappi.start(builtins=True)
     start_bot(False, True)
+    if PROFILING:
+        yappi.stop()
+        yappi.get_func_stats().print_all()
