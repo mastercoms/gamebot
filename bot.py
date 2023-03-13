@@ -434,7 +434,7 @@ class GameClient(discord.ext.commands.Bot):
         self.db_new = TinyDB(Path("./db_new.json"))
         for table in self.db.tables():
             new_table = self.db_new.table(table)
-            for row in table.all():
+            for row in self.db.table(table).all():
                 new_table.insert(row)
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
