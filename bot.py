@@ -544,7 +544,7 @@ class GameClient(discord.ext.commands.Bot):
         if not marks:
             return
         for game, game_marks in marks.items():
-            for gamer_id, params in game_marks:
+            for gamer_id, params in game_marks.items():
                 self.current_marks[game][self.guild.get_member(int(gamer_id))] = params[0], params[1], params[2]
 
     async def on_ready(self):
@@ -1945,8 +1945,8 @@ def process_in(
             # didn't work
             attempt_date = None
         except OverflowError:
-            # overflowed, get largest date (9999-12-31T23:59:59.999908)
-            attempt_date = arrow.get(253402300799.9999)
+            # overflowed, get largest date (9999-12-31T23:59:59.999969)
+            attempt_date = arrow.get(253402300799.9999847)
         # go to next arg
         end += 1
         # we made a new date
@@ -1960,6 +1960,9 @@ def process_in(
     # consume our peeked inputs to the date
     del args[:new_start]
     return confirmed_date
+
+
+def mapreduce_at(args: list[list[str]]):
 
 
 def process_at(
