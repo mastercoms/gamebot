@@ -22,7 +22,7 @@ When starting it, you can also say some arguments:
 
 * `at <time>`: set a specific date/time to check at. ex: `at 9`, `at 9pm`, `at 9pm PST`, `at 9:30`, etc.
 * `in <time>`: set a length of time to check at. ex: `in 1h`, `in 1.5h`, `in 5m`, `in 5 mins`, `in 5 hours, 20 minutes, 30 seconds`, etc.
-* `for <game>`: set the name of the game to schedule.
+* `on <game>`: set the name of the game to schedule.
 
 While it's started, anyone can say:
 
@@ -40,7 +40,7 @@ In any case, anyone can say:
 * `register <steam account>`: associates a given Steam user to your Discord account for match handling.
 * `option set <key> [value]`: sets an option, or removes it if value not specified (admins only)
 * `option get <key>`: gets an option (admins only)
-* `mark <in/at> <time> and <in/at> <time>`: marks yourself as available for a scheduled game at a given time
+* `mark <in/at> <time> to <in/at> <time>`: marks yourself as available for a scheduled game at a given time
 
 ## configuration
 

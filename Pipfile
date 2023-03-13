@@ -28,6 +28,7 @@ requests = "*"
 numpy = "*"
 gevent = "*"
 aiodns = "*"
+yappi = "*"
 
 [requires]
 python_version = "3.11"

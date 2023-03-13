@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import yappi
+
 import gevent
 gevent.config.loop = "libuv"
 
@@ -543,9 +545,14 @@ class GameClient(discord.ext.commands.Bot):
         marks = get_value("marks", table=self.backup_table)
         if not marks:
             return
+        now = utcnow()
         for game, game_marks in marks.items():
             for gamer_id, params in game_marks.items():
-                self.current_marks[game][self.guild.get_member(int(gamer_id))] = params[0], params[1], params[2]
+                end = datetime.datetime.fromisoformat(params[1])
+                diff = now - end if now > end else end - now
+                if diff >= datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
+                    continue
+                self.current_marks[game][self.guild.get_member(int(gamer_id))] = datetime.datetime.fromisoformat(params[0]), end, params[2]
 
     async def on_ready(self):
         guild = None
@@ -1842,8 +1849,6 @@ class GameOptions:
         self.bucket = BUCKET_MIN
 
 
-CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
-
 HUMANIZE_VOWEL_WORDS = {"hour"}
 HUMANIZE_MAPPING = {
     "years": (12.0, "months"),
@@ -1904,18 +1909,24 @@ def process_in(
     # go through until we get a date
     while True:
         word = args[end].lower()
-        # and is a separator
-        if word == "and":
+        # to is a separator
+        if word == "to":
             break
         # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
-        if word[0] in NUMERIC and word[len(word) - 1] not in NUMERIC:
-            i = 0
-            for i, c in enumerate(word):
-                if c not in NUMERIC:
-                    break
-            args.insert(end + 1, word[i:])
-            word = word[:i]
-            last = len(args)
+        if word[0] in NUMERIC:
+            # TODO: make this detection more generic so people can combine a shorthand with other quantities
+            # if it's just a raw quanity, add a shorthand unit so it can be handled
+            if word[len(word) - 1] in NUMERIC and end + 1 >= last:
+                word += "m"
+            # now check if there's a shorthand unit at the end of the quantity
+            if word[len(word) - 1] not in NUMERIC:
+                i = 0
+                for i, c in enumerate(word):
+                    if c not in NUMERIC:
+                        break
+                args.insert(end + 1, word[i:])
+                word = word[:i]
+                last = len(args)
         if last > end + 1:
             noun = args[end + 1].lower()
             # replace shorthand with longform unit, as required by the parser
@@ -1980,8 +1991,8 @@ def process_at(
     # go through until we get a date
     while True:
         word = args[end].lower()
-        # and is a separator
-        if word == "and":
+        # to is a separator
+        if word == "to":
             break
         # combine if space
         if last > end + 1:
@@ -2053,6 +2064,9 @@ def process_time_control(control: str, args: list[str]) -> datetime.datetime | N
     return None
 
 
+CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
+
+
 async def consume_args(
     args: list[str],
     gamer: discord.Member,
@@ -2081,105 +2095,121 @@ async def consume_args(
     else:
         # sometimes users accidentally try to control a game when it doesn't exist
         if control in CURRENT_GAME_ARGS:
+            await channel.send(f"Cannot control a {KEYWORD} when there is none currently active.")
             return None
-        # we need more args than the control for these
-        if args:
-            # future date handling
-            if options.future is None:
-                if control == "at":
-                    confirmed_date = process_at(args)
-                    if confirmed_date:
-                        options.future = confirmed_date
-                    return options
-                if control == "in":
-                    confirmed_date = process_in(args)
-                    if confirmed_date:
-                        options.future = confirmed_date
-                    return options
-        else:
-            if control == "on":
-                game = args.pop(0).lower()
-                if game in GAMES:
-                    options.game = game
-                    return options
-
-    if args:
-        if control == "register":
-            id_arg = args.pop(0)
-            # try to parse a Steam ID if there is one
-            steam_id = try_steam_id(id_arg)
-            # try friend code
-            if not steam_id:
-                friend_code = id_arg.rstrip("/")
-                if "steamcommunity.com/user/" in friend_code:
-                    if not friend_code.startswith("http"):
-                        friend_code = "https://" + friend_code
-                    friend_code = friend_code.replace("steamcommunity.com/user", "s.team/p")
-                steam_id = from_invite_code(friend_code)
-            # try profiles URL
-            if not steam_id:
-                profile_id = id_arg
-                if "steamcommunity.com/profiles/" in profile_id:
-                    if not profile_id.startswith("http"):
-                        profile_id = "https://" + profile_id
-                    profile_id = profile_id.replace("steamcommunity.com/profiles/", "")
-                    profile_id = profile_id.replace("https://", "")
-                    profile_id = profile_id.replace("http://", "")
-                    profile_id = profile_id.rstrip("/")
-                    steam_id = try_steam_id(profile_id)
-            # try vanity URL
-            if not steam_id and client.steamapi:
-                vanity = id_arg
-                if "steamcommunity.com/id/" in vanity:
-                    if not vanity.startswith("http"):
-                        vanity = "https://" + vanity
-                    vanity = vanity.replace("steamcommunity.com/id/", "")
-                    vanity = vanity.replace("https://", "")
-                    vanity = vanity.replace("http://", "")
-                    vanity = vanity.rstrip("/")
-                # either a /id/ URL or a raw vanity
-                try:
-                    resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
-                    vanity = resp.get("response", {}).get("steamid")
-                    if vanity:
-                        steam_id = try_steam_id(vanity)
-                except:
-                    pass
-            if not steam_id:
-                await channel.send("Steam ID not found.")
+        # future date handling
+        if options.future is None:
+            if control == "at":
+                if not args:
+                    await channel.send(f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm")
+                    return None
+                confirmed_date = process_at(args)
+                if confirmed_date:
+                    options.future = confirmed_date
+                return options
+            if control == "in":
+                if not args:
+                    await channel.send(f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes")
+                    return None
+                confirmed_date = process_in(args)
+                if confirmed_date:
+                    options.future = confirmed_date
+                return options
+        if control == "on":
+            if not args:
+                await channel.send(f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}")
                 return None
-            client.players_table.upsert({"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id)
-            await channel.send("Steam ID linked. Matches will now be listed.")
+            game = args.pop(0).lower()
+            if game in GAMES:
+                options.game = game
+                return options
+
+    if control == "register":
+        if not args:
+            await channel.send(f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567")
             return None
-        if control == "option":
-            if not gamer.guild_permissions.administrator:
-                await channel.send("Not permitted to set/get options.")
-                return None
-            option_mode = args.pop(0).lower()
-            option = args.pop(0).lower()
-            if option_mode == "set":
-                if len(args):
-                    new_value = args.pop(0)
-                    if "id" in option:
-                        tmp = new_value
-                        new_value = get_int(new_value, default=None)
-                        if new_value is None:
-                            new_value = tmp
+        id_arg = args.pop(0)
+        # try to parse a Steam ID if there is one
+        steam_id = try_steam_id(id_arg)
+        # try friend code
+        if not steam_id:
+            friend_code = id_arg.rstrip("/")
+            if "steamcommunity.com/user/" in friend_code:
+                if not friend_code.startswith("http"):
+                    friend_code = "https://" + friend_code
+                friend_code = friend_code.replace("steamcommunity.com/user", "s.team/p")
+            steam_id = from_invite_code(friend_code)
+        # try profiles URL
+        if not steam_id:
+            profile_id = id_arg
+            if "steamcommunity.com/profiles/" in profile_id:
+                if not profile_id.startswith("http"):
+                    profile_id = "https://" + profile_id
+                profile_id = profile_id.replace("steamcommunity.com/profiles/", "")
+                profile_id = profile_id.replace("https://", "")
+                profile_id = profile_id.replace("http://", "")
+                profile_id = profile_id.rstrip("/")
+                steam_id = try_steam_id(profile_id)
+        # try vanity URL
+        if not steam_id and client.steamapi:
+            vanity = id_arg
+            if "steamcommunity.com/id/" in vanity:
+                if not vanity.startswith("http"):
+                    vanity = "https://" + vanity
+                vanity = vanity.replace("steamcommunity.com/id/", "")
+                vanity = vanity.replace("https://", "")
+                vanity = vanity.replace("http://", "")
+                vanity = vanity.rstrip("/")
+            # either a /id/ URL or a raw vanity
+            try:
+                resp = client.steamapi.ISteamUser.ResolveVanityURL(vanityurl=vanity)
+                vanity = resp.get("response", {}).get("steamid")
+                if vanity:
+                    steam_id = try_steam_id(vanity)
+            except:
+                pass
+        if not steam_id:
+            await channel.send("Steam ID not found.")
+            return None
+        client.players_table.upsert({"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id)
+        await channel.send("Steam ID linked. Matches will now be listed.")
+        return None
+    if control == "option":
+        if not gamer.guild_permissions.administrator:
+            await channel.send("Not permitted to set/get options.")
+            return None
+        if not args:
+            await channel.send(f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789")
+            return None
+        option_mode = args.pop(0).lower()
+        option = args.pop(0).lower()
+        if option_mode == "set":
+            if len(args):
+                new_value = args.pop(0)
+                if "id" in option:
+                    tmp = new_value
+                    new_value = get_int(new_value, default=None)
+                    if new_value is None:
+                        new_value = tmp
 
-                    set_value(option, new_value, table=client.settings_table)
-                    await channel.send(f"{option}={new_value}")
-                else:
-                    del_value(option, table=client.settings_table)
-                    await channel.send(f"{option}=null")
+                set_value(option, new_value, table=client.settings_table)
+                await channel.send(f"{option}={new_value}")
             else:
-                await channel.send(f"{option}={get_value(option, table=client.settings_table)}")
+                del_value(option, table=client.settings_table)
+                await channel.send(f"{option}=null")
+        else:
+            await channel.send(f"{option}={get_value(option, table=client.settings_table)}")
+        return None
+    # if buckets
+    if control == "if":
+        if not args:
+            await channel.send(f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3")
             return None
-        # if buckets
-        if control == "if":
-            options.bucket = get_int(args.pop(0), BUCKET_MIN)
-            return options
-        # mark your scheduled availability
-        if control == "mark":
+        options.bucket = get_int(args.pop(0), BUCKET_MIN)
+        return options
+    # mark your scheduled availability
+    if control == "mark":
+        if args:
             time_control = args.pop(0).lower()
             if time_control == "rm" or time_control == "remove":
                 options.remove_mark = True
@@ -2188,7 +2218,7 @@ async def consume_args(
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
-                if sep == "and" and args:
+                if sep == "to" and args:
                     time_control = args.pop(0).lower()
                     if args:
                         end_datetime = process_time_control(time_control, args)
@@ -2196,8 +2226,8 @@ async def consume_args(
                     options.start = start_datetime
                     options.future = end_datetime
                     return options
-            await channel.send(f"{KEYWORD} mark <in/at> <time> and <in/at> <time>")
-            return None
+        await channel.send(f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours")
+        return None
 
     if control == "status":
         match = client.current_match
@@ -2222,7 +2252,8 @@ async def consume_args(
         return None
 
     # if we didn't find the control, it's an invalid command
-    await channel.send("Unrecognized input, please check the usage of the command.")
+    arguments = KEYWORD + " " + control + " " + " ".join(args)
+    await channel.send(f"Unrecognized input \"{arguments}\", please check the usage of the command.")
     return None
 
 
@@ -2325,4 +2356,7 @@ def start_bot(debug, no_2fa):
 
 if __name__ == "__main__":
     # TODO: arg parse
+    yappi.set_context_backend("greenlet")
+    yappi.set_clock_type("wall")
+    yappi.start(builtins=True)
     start_bot(False, True)
