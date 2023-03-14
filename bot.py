@@ -2335,10 +2335,10 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     last = len(args)
     confirmed_date = None
     the_timezone = get_value(str(gamer.id), default=None, table=client.timezone_table)
-    if the_timezone is None:
-        the_timezone = LOCAL_TZINFO
-    else:
+    if the_timezone:
         the_timezone = timezone(the_timezone)
+    if not the_timezone:
+        the_timezone = LOCAL_TZINFO
     local_now = client.now.astimezone(the_timezone)
     # go through until we get a date
     while True:
