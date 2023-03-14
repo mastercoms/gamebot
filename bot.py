@@ -21,7 +21,7 @@ import string
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 
 import aiohttp
 import arrow
@@ -40,13 +40,16 @@ from pytz import timezone
 from steam.steamid import SteamID, from_invite_code, make_steam64
 from steam.webapi import WebAPI
 from steam.client import SteamClient
-from steam.client.user import SteamUser
 from steam.enums.common import EFriendRelationship
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
 from tinydb import TinyDB, Query
 from thefuzz import fuzz
 from numpy import interp
+
+if TYPE_CHECKING:
+    from steam.client.user import SteamUser
+    from collections.abc import Callable, Coroutine
 
 if os.name == "nt":
     # handle Windows imports
@@ -67,12 +70,12 @@ asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 DEBUGGING = True
 
 
-def print_debug(*args, **kwargs):
+def print_debug(*args: Any, **kwargs: Any) -> None:
     if DEBUGGING:
         print(*args, **kwargs)
 
 
-def create_task(coro, *, name=None):
+def create_task(coro: Coroutine, *, name: str = None) -> TaskWrapper:
     task = asyncio.create_task(coro, name=name)
     return TaskWrapper(task)
 
@@ -80,11 +83,7 @@ def create_task(coro, *, name=None):
 def get_channel(channel: discord.TextChannel | None) -> discord.TextChannel:
     settings_channel = get_value("channel_id", table=client.settings_table)
     if settings_channel:
-        guild = None
-        for guild in client.guilds:
-            break
-        if guild is not None:
-            settings_channel = guild.get_channel(settings_channel)
+        settings_channel = client.guild.get_channel(settings_channel)
     return settings_channel or channel
 
 
@@ -204,7 +203,6 @@ class DotaAPI:
 
     @staticmethod
     async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
-        global DOTA_CACHED_CONSTANTS
         async with httpx.AsyncClient(base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/") as odotagh:
             for res in resources:
                 url = f"{res}.json"
@@ -214,7 +212,6 @@ class DotaAPI:
 
     @staticmethod
     def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
-        global DOTA_CACHED_CONSTANTS
         for res in resources:
             DOTA_CACHED_CONSTANTS[res] = DOTA_CACHED_CONSTANTS.get(res)
         return DOTA_CACHED_CONSTANTS
@@ -328,11 +325,11 @@ class SteamWorker:
                 # first try getting the friends list of the requesting user
                 try:
                     resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
-                except:
+                except Exception:
                     try:
                         # if it's private, try getting the friends list of the mutual target
                         resp = client.steamapi.ISteamUser.GetFriendList(steamid=mutual)
-                    except:
+                    except Exception:
                         return
                     # search for the requesting user
                     search_for = user_steam_id
@@ -346,10 +343,7 @@ class SteamWorker:
                 self.steam.friends.add(user)
 
     def login(self, username, password, no_2fa):
-        if no_2fa:
-            two_factor_code = None
-        else:
-            two_factor_code = input("Enter 2FA code: ")
+        two_factor_code = None if no_2fa else input("Enter 2FA code: ")
         if two_factor_code or os.path.exists(self.steam._get_sentry_path(username)):
             self.steam.login(username, password, two_factor_code=two_factor_code)
         else:
@@ -550,8 +544,8 @@ class GameClient(discord.ext.commands.Bot):
 
     async def on_ready(self):
         guild = None
-        for guild in self.guilds:
-            break
+        if client.guilds:
+            guild = client.guilds[0]
         if guild is None:
             return
         self.guild = guild
@@ -597,7 +591,8 @@ class GameClient(discord.ext.commands.Bot):
                                 async for chunk in stream.aiter_bytes():
                                     download_file.write(chunk)
                     if cache_path.stat().st_size < 2048 or not cache_path.exists():
-                        raise ValueError("Corrupted file download")
+                        msg = "Corrupted file download"
+                        raise ValueError(msg)
                     break
                 except Exception as e:
                     cache_path.unlink(missing_ok=True)
@@ -692,10 +687,9 @@ class GameClient(discord.ext.commands.Bot):
                             def clean_mark(old):
                                 old[options.game].pop(str(gamer.id), None)
                                 return old
-
                             update_value(clean_mark, "marks", table=client.backup_table)
                         return
-                    elif options.start:
+                    if options.start:
                         self.current_marks[options.game][gamer] = options.start, options.future, options.bucket
                         saved_marks = {}
                         for game, game_marks in self.current_marks.items():
@@ -754,8 +748,7 @@ def get_value(key: str, *, default: TableType = None, table=None) -> TableType:
     res = table_interface.get(Store.k == key)
     if res:
         return res["v"]
-    else:
-        return default
+    return default
 
 
 def set_value(key: str, val: TableType, *, table=None):
@@ -809,8 +802,7 @@ def print_timestamp(timestamp: int, style: str | None = None) -> str:
     """
     if style:
         return f"<t:{timestamp}:{style}>"
-    else:
-        return f"<t:{timestamp}>"
+    return f"<t:{timestamp}>"
 
 
 def generate_datetime(timestamp: int) -> datetime.datetime:
@@ -1087,7 +1079,7 @@ class DotaMatch(Match):
                     except Exception as e:
                         if tries >= 10:
                             print("Failed to get realtime stats:", repr(e))
-                            msg_task = create_task(channel.send("Match not started yet."))
+                            create_task(channel.send("Match not started yet."))
                             return
                         wait_backoff(tries)
                 match = resp["match"]
@@ -1119,7 +1111,7 @@ class DotaMatch(Match):
                             }
                         team_adv = per_player_stats[team_idx]
                         for player in team["players"]:
-                            for key in team_adv.keys():
+                            for key in team_adv:
                                 val = player[key]
                                 if key == "level":
                                     val = level_to_xp[val - 1]
@@ -1130,7 +1122,7 @@ class DotaMatch(Match):
                         other_team = (team_id + 1) % 2
                         net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
                         adv_map = {"level": 0, "net_worth": net_worth_adv, "\u200B": "\u200B"}
-                        for key in per_player_stats[team_id].keys():
+                        for key in per_player_stats[team_id]:
                             adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
                         adv_map["\u200B\u200B"] = "\u200B"
 
@@ -1230,11 +1222,11 @@ class DotaMatch(Match):
                     if highest_towers[2]:
                         embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
                     else:
-                        embed.add_field(name="Radiant Towers", value=f"No towers destroyed")
+                        embed.add_field(name="Radiant Towers", value="No towers destroyed")
                     if highest_towers[3]:
                         embed.add_field(name="Dire Towers", value=f"Tier {highest_towers[3]} destroyed")
                     else:
-                        embed.add_field(name="Dire Towers", value=f"No towers destroyed")
+                        embed.add_field(name="Dire Towers", value="No towers destroyed")
                     embed.add_field(name="\u200B", value="\u200B")
                     embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
                     embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
@@ -1242,18 +1234,18 @@ class DotaMatch(Match):
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
-                msg_task = create_task(channel.send(embed=embed))
+                create_task(channel.send(embed=embed))
             elif live_result == 4 or live_result == 0:
-                msg_task = create_task(channel.send("No live match found."))
+                create_task(channel.send("No live match found."))
             else:
-                msg_task = create_task(channel.send(f"Failed to get live match data: error code {live_result}"))
+                create_task(channel.send(f"Failed to get live match data: error code {live_result}"))
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
             self.account_id,
-            matches_requested="1"
+            matches_requested="1",
         )
         if matches:
             match = matches[0]
@@ -1279,13 +1271,12 @@ class DotaMatch(Match):
             if match["start_time"] < self.timestamp:
                 return None
             return match
-        else:
-            return None
+        return None
 
     async def get_basic_match(self, match_id: int) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_basic_matches(
             self.account_id,
-            significant=0
+            significant=0,
         )
         if matches:
             for match in matches:
@@ -1353,7 +1344,7 @@ class DotaMatch(Match):
                 }
                 for player in match_details["players"]:
                     player_team = player["team_number"]
-                    for key in adv_map.keys():
+                    for key in adv_map:
                         if player_team == team_num:
                             adv_map[key] += player[key]
                         else:
@@ -1395,7 +1386,7 @@ class DotaMatch(Match):
         else:
             client.current_match = None
             set_value("match", {"active": False}, table=client.backup_table)
-            print_debug(f"Current match ended")
+            print_debug("Current match ended")
 
 
 def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
@@ -1715,7 +1706,7 @@ class Game:
                 # start the game up again
                 client.now = self.future  # this is the time we should have landed on
                 self.reset()
-                check_task = create_task(self.start(client.now + self.check_delta, mention=mention))
+                create_task(self.start(client.now + self.check_delta, mention=mention))
                 return
         else:
             print_debug("No gamers")
@@ -1915,7 +1906,8 @@ def process_in(
             # now check if there's a shorthand unit at the end of the quantity
             if word[len(word) - 1] not in NUMERIC:
                 i = 0
-                for i, c in enumerate(word):
+                for idx, c in enumerate(word):
+                    i = idx
                     if c not in NUMERIC:
                         break
                 args.insert(end + 1, word[i:])
@@ -1932,10 +1924,7 @@ def process_in(
             # if you don't for 1, you must use "a" or "an"
             if word == "1":
                 if not noun.endswith("s"):
-                    if noun in HUMANIZE_VOWEL_WORDS:
-                        word = "an"
-                    else:
-                        word = "a"
+                    word = "an" if noun in HUMANIZE_VOWEL_WORDS else "a"
             else:
                 # if it's a decimal quantity, convert it to the combination of units needed
                 parsed_num = get_float(word, default=None)
@@ -1996,7 +1985,7 @@ def process_at(
                 end += 1
         local_now = client.now.astimezone(LOCAL_TZINFO)
         # use pm and am, not p or a
-        if word.endswith("p") or word.endswith("a"):
+        if word.endswith(("p", "a")):
             word += "m"
         elif not word.endswith("pm") and not word.endswith("am"):
             # if there's no period at all, just autodetect based on current
@@ -2053,7 +2042,7 @@ def process_at(
 def process_time_control(control: str, args: list[str]) -> datetime.datetime | None:
     if control == "at":
         return process_at(args)
-    elif control == "in":
+    if control == "in":
         return process_in(args)
     return None
 
@@ -2160,7 +2149,8 @@ async def consume_args(
                 vanity = resp.get("response", {}).get("steamid")
                 if vanity:
                     steam_id = try_steam_id(vanity)
-            except:
+            except Exception:
+                # this is ok, vanity URL was incorrect
                 pass
         if not steam_id:
             await channel.send("Steam ID not found.")
@@ -2296,7 +2286,7 @@ async def main(debug, no_2fa):
     # create opendota API HTTP client
     async with (
         httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True, auth=opendota_api_key) as opendota,
-        httpx.AsyncClient(timeout=10.0, http2=True) as http_client
+        httpx.AsyncClient(timeout=10.0, http2=True) as http_client,
     ):
         # create our client, limit messages to what we need to keep track of
         client = GameClient(
@@ -2343,7 +2333,7 @@ with open("settings.json", "rb") as f:
     DEFAULT_GAME = GAMES[0]
 
 
-def start_bot(debug, no_2fa):
+def start_bot(*, debug: bool, no_2fa: bool) -> None:
     discord.utils.setup_logging(level=logging.DEBUG if debug else logging.INFO)
     asyncio.run(main(debug, no_2fa))
 
@@ -2357,7 +2347,7 @@ if __name__ == "__main__":
         yappi.set_context_backend("greenlet")
         yappi.set_clock_type("cpu")
         yappi.start(builtins=True)
-    start_bot(False, True)
+    start_bot(debug=False, no_2fa=True)
     if PROFILING:
         yappi.stop()
         yappi.get_func_stats().print_all()
