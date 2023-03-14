@@ -2436,7 +2436,7 @@ def process_at(args: list[str]) -> datetime.datetime | None:
         confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
     # if we got it wrong, advance from AM -> PM (or PM -> AM)
     if confirmed_date and client.now > confirmed_date:
-        res += NEXT_PERIOD
+        confirmed_date += NEXT_PERIOD
     return confirmed_date
 
 
