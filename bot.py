@@ -2550,7 +2550,7 @@ async def consume_args(
     if control == "register":
         if not args:
             await channel.send(
-                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567",
+                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567",
             )
             return None
         id_arg = args.pop(0)
@@ -2608,10 +2608,13 @@ async def consume_args(
             my_tz = args.pop(0)
             if my_tz in pytz.all_timezones_set:
                 my_tz = timezone(my_tz)
-                set_value(str(gamer.id), my_tz.zone, table=client.timezone_table)
-                return None
+                if my_tz:
+                    my_tz = my_tz.zone
+                    set_value(str(gamer.id), my_tz, table=client.timezone_table)
+                    await channel.send(f"Timezone set to {my_tz}.")
+                    return None
         await channel.send(
-            f"{KEYWORD} timezone <timezone>\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n\n**Example:** {KEYWORD} timezone EST",
+            f"{KEYWORD} timezone <timezone>\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
         )
         return None
     if control == "option":
