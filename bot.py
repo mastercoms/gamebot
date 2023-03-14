@@ -560,9 +560,7 @@ class GameClient(discord.ext.commands.Bot):
                 return
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
-            gamers = set(
-                [self.guild.get_member(gamer_id) for gamer_id in save["gamers"]]
-            )
+            gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamers"]}
             channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.known_matches = save["known_matches"]
@@ -1684,9 +1682,8 @@ class DotaMatch(Match):
             if won:
                 if EXTRA_WIN_MESSAGE:
                     await self.channel.send(EXTRA_WIN_MESSAGE)
-            else:
-                if EXTRA_LOSS_MESSAGE:
-                    await self.channel.send(EXTRA_LOSS_MESSAGE)
+            elif EXTRA_LOSS_MESSAGE:
+                await self.channel.send(EXTRA_LOSS_MESSAGE)
         else:
             self.save()
         if self.polls < MATCH_MAX_POLLS:
@@ -1794,14 +1791,14 @@ class Game:
         Resets the game to require new confirmation, for starting a Game Check.
         """
         print_debug("Resetted game")
-        self.group_buckets = dict()
+        self.group_buckets = {}
 
         game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
         game_max = GAME_DATA[self.game_name].get("max", game_min)
         bucket_range_max = game_max + 1
         for bucket in range(game_min, bucket_range_max):
             self.group_buckets[bucket] = set()
-        self.gamer_buckets = dict()
+        self.gamer_buckets = {}
         self.message = None
         self.base_mention = None
 
@@ -2166,13 +2163,14 @@ HUMANIZE_SHORTHAND = {
     "s": "seconds",
 }
 NUMERIC = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "."}
+MAX_HUMANIZE_PRECISION = 0.1
 
 
 def convert_humanize_decimal(quantity: float, unit: str) -> str:
     frac, whole = math.modf(quantity)
     base = f"{int(quantity)} {unit}"
     # if this isn't a significant float, then we can just return it back
-    if abs(frac) < 0.1:
+    if abs(frac) < MAX_HUMANIZE_PRECISION:
         return base
     mapping = HUMANIZE_MAPPING.get(unit)
     # if there's no further conversion, we just deal with the lower precision
