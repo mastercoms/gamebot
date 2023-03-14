@@ -2317,12 +2317,16 @@ def mapreduce_at(args: list[list[str]]):
     pass
 
 
+MONTHS = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'November', 'december'}
+
+
 def process_at(args: list[str]) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
         args.pop(0)
         return utcnow()
     date_string = ""
+    last_word = ""
     end = 0
     new_start = 0
     last = len(args)
@@ -2340,17 +2344,32 @@ def process_at(args: list[str]) -> datetime.datetime | None:
                 word += period
                 end += 1
         local_now = client.now.astimezone(LOCAL_TZINFO)
-        # use pm and am, not p or a
-        if word.endswith(("p", "a")):
-            word += "m"
-        elif not word.endswith("pm") and not word.endswith("am"):
-            # if there's no period at all, just autodetect based on current
-            # TODO: probably want to detect if the time has past, so we can flip am or pm
-            word += "am" if local_now.hour < 12 else "pm"
-        just_time = word[:-2]
-        # if it's just a single int representing the hour, normalize it into a full time
-        if get_int(just_time, None) is not None:
-            word = just_time + ":00" + word[-2:]
+        if word[0] in NUMERIC:
+            numeric = get_int(word, None)
+            # whole number, it could be part of a date, not a time
+            is_time = True
+            is_24_hour = False
+            if numeric is not None:
+                # Can't have January 12am or 24:00
+                if last_word in MONTHS or numeric > 23:
+                    is_time = False
+                elif numeric > 13:
+                    is_24_hour = True
+            if is_time:
+                if is_24_hour:
+                    just_time = word
+                else:
+                    # use pm and am, not p or a
+                    if word.endswith(("p", "a")):
+                        word += "m"
+                    elif not word.endswith("pm") and not word.endswith("am"):
+                        # if there's no period at all, just autodetect based on current
+                        # TODO: probably want to detect if the time has past, so we can flip am or pm
+                        word += "am" if local_now.hour < 12 else "pm"
+                    just_time = word[:-2]
+                # if it's just a single int representing the hour, normalize it into a full time
+                if get_int(just_time, None) is not None:
+                    word = just_time + ":00" + word[-2:]
         date_string += " " + word if date_string else word
         if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
             settings = {
@@ -2388,6 +2407,7 @@ def process_at(args: list[str]) -> datetime.datetime | None:
         # if we surpass the last arg, end
         if end >= last:
             break
+        last_word = word
     # consume our peeked inputs to the date
     del args[:new_start]
     if confirmed_date and confirmed_date.tzinfo is None:
@@ -2619,7 +2639,9 @@ async def consume_args(
         return None
 
     # if we didn't find the control, it's an invalid command
-    arguments = KEYWORD + " " + control + " " + " ".join(args)
+    arguments = KEYWORD + " " + control
+    if args:
+        arguments += " " + " ".join(args)
     await channel.send(
         f'Unrecognized input "{arguments}", please check the usage of the command.',
     )
@@ -2743,6 +2765,5 @@ if __name__ == "__main__":
         with yappi.run():
             start_bot(debug=False, no_2fa=True)
         yappi.get_func_stats().print_all()
-        yappi.get_greenlet_stats().print_all()
     else:
         start_bot(debug=False, no_2fa=True)
