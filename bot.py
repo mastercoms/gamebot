@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gevent
+
 gevent.config.loop = "libuv"
 
 import gevent.monkey
@@ -11,6 +12,7 @@ gevent.monkey.patch_dns()
 
 import asyncio
 import dataclasses
+import datetime
 import logging
 import math
 import os
@@ -18,38 +20,36 @@ import random
 import re
 import socket
 import string
-
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import arrow
 import asyncio_gevent
 import dateparser
-import datetime
 import discord
 import httpx
 import orjson
-
 from BetterJSONStorage import BetterJSONStorage
-from discord import Intents, AllowedMentions
+from discord import AllowedMentions, Intents
 from discord.ext.commands import MemberNotFound
-from httpx_auth import QueryApiKey
-from pytz import timezone
-from steam.steamid import SteamID, from_invite_code, make_steam64
-from steam.webapi import WebAPI
-from steam.client import SteamClient
-from steam.enums.common import EFriendRelationship
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
-from tinydb import TinyDB, Query
-from thefuzz import fuzz
+from httpx_auth import QueryApiKey
 from numpy import interp
+from pytz import timezone
+from steam.client import SteamClient
+from steam.enums.common import EFriendRelationship
+from steam.steamid import SteamID, from_invite_code, make_steam64
+from steam.webapi import WebAPI
+from thefuzz import fuzz
+from tinydb import Query, TinyDB
 
 if TYPE_CHECKING:
-    from steam.client.user import SteamUser
     from collections.abc import Callable, Coroutine
+
+    from steam.client.user import SteamUser
 
 if os.name == "nt":
     # handle Windows imports
@@ -92,7 +92,7 @@ BASE_BACKOFF = 0.016
 
 
 def get_backoff(failures: int) -> float:
-    return random.uniform(0, min(MAX_BACKOFF, BASE_BACKOFF * 2 ** failures))
+    return random.uniform(0, min(MAX_BACKOFF, BASE_BACKOFF * 2**failures))
 
 
 def wait_backoff(failures: int):
@@ -125,25 +125,33 @@ class DiscordUtil:
     # Copyright (c) 2015-present Rapptz
     # MIT License
 
-    _ID_REGEX = re.compile(r'(\d{15,20})$')
+    _ID_REGEX = re.compile(r"(\d{15,20})$")
 
     @staticmethod
     def _get_id_match(argument):
         return DiscordUtil._ID_REGEX.match(argument)
 
     @staticmethod
-    async def query_member_named(guild: discord.Guild, argument: str) -> discord.Member | None:
+    async def query_member_named(
+        guild: discord.Guild, argument: str
+    ) -> discord.Member | None:
         cache = guild._state.member_cache_flags.joined
-        if len(argument) > 5 and argument[-5] == '#':
-            username, _, discriminator = argument.rpartition('#')
+        if len(argument) > 5 and argument[-5] == "#":
+            username, _, discriminator = argument.rpartition("#")
             members = await guild.query_members(username, limit=100, cache=cache)
-            return discord.utils.get(members, name=username, discriminator=discriminator)
+            return discord.utils.get(
+                members, name=username, discriminator=discriminator
+            )
         else:
             members = await guild.query_members(argument, limit=100, cache=cache)
-            return discord.utils.find(lambda m: m.name == argument or m.nick == argument, members)
+            return discord.utils.find(
+                lambda m: m.name == argument or m.nick == argument, members
+            )
 
     @staticmethod
-    async def query_member_by_id(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    async def query_member_by_id(
+        guild: discord.Guild, user_id: int
+    ) -> discord.Member | None:
         ws = client._get_websocket(shard_id=guild.shard_id)
         cache = guild._state.member_cache_flags.joined
         if ws.is_ratelimited():
@@ -165,8 +173,12 @@ class DiscordUtil:
         return members[0]
 
     @staticmethod
-    async def convert_user_arg(message: discord.Message, argument: str) -> discord.Member | None:
-        match = DiscordUtil._get_id_match(argument) or re.match(r'<@!?(\d{15,20})>$', argument)
+    async def convert_user_arg(
+        message: discord.Message, argument: str
+    ) -> discord.Member | None:
+        match = DiscordUtil._get_id_match(argument) or re.match(
+            r"<@!?(\d{15,20})>$", argument
+        )
         result = None
         guild = client.guild
         user_id = None
@@ -178,7 +190,9 @@ class DiscordUtil:
         else:
             user_id = int(match.group(1))
             if guild:
-                result = guild.get_member(user_id) or discord.utils.get(message.mentions, id=user_id)
+                result = guild.get_member(user_id) or discord.utils.get(
+                    message.mentions, id=user_id
+                )
 
         if not isinstance(result, discord.Member):
             if guild is None:
@@ -203,7 +217,9 @@ class DotaAPI:
 
     @staticmethod
     async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
-        async with httpx.AsyncClient(base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/") as odotagh:
+        async with httpx.AsyncClient(
+            base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/"
+        ) as odotagh:
             for res in resources:
                 url = f"{res}.json"
                 DOTA_CACHED_CONSTANTS[res] = (await odotagh.get(url)).json()
@@ -217,13 +233,17 @@ class DotaAPI:
         return DOTA_CACHED_CONSTANTS
 
     @staticmethod
-    def query_constant_name(constants: dict[str, dict[str, Any]], resource: str, idx: int) -> str:
+    def query_constant_name(
+        constants: dict[str, dict[str, Any]], resource: str, idx: int
+    ) -> str:
         constant = constants[resource]
         data = constant.get(str(idx), constant["0"])
         return data["name"].replace(f"{resource}_", "").replace("_", " ").title()
 
     @staticmethod
-    def query_match_constant(constants: dict[str, dict[str, Any]], match: dict[str, Any], resource: str):
+    def query_match_constant(
+        constants: dict[str, dict[str, Any]], match: dict[str, Any], resource: str
+    ):
         return DotaAPI.query_constant_name(constants, resource, match[resource])
 
     @staticmethod
@@ -233,7 +253,9 @@ class DotaAPI:
             # this endpoint regularly fails, so we retry a few times
             tries += 1
             try:
-                resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(account_id=str(account_id), **params)
+                resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(
+                    account_id=str(account_id), **params
+                )
                 break
             except Exception as e:
                 if tries >= 3:
@@ -257,7 +279,9 @@ class DotaAPI:
             # this endpoint regularly fails, so we retry a few times
             tries += 1
             try:
-                resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(match_id=str(match_id), include_persona_names=True)
+                resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(
+                    match_id=str(match_id), include_persona_names=True
+                )
                 print_debug(f"get_match: {resp}")
                 break
             except Exception as e:
@@ -292,12 +316,12 @@ class SteamWorker:
         def handle_after_logon():
             self.logged_on_once = True
 
-            print("⎯"*30)
+            print("⎯" * 30)
             print("Logged on as:", worker.user.name)
             print("Community profile:", worker.steam_id.community_url)
             print("Last logon:", worker.user.last_logon)
             print("Last logoff:", worker.user.last_logoff)
-            print("⎯"*30)
+            print("⎯" * 30)
 
         @worker.on("disconnected")
         def handle_disconnect():
@@ -309,7 +333,9 @@ class SteamWorker:
 
         @worker.on("reconnect")
         def handle_reconnect(delay):
-            print(f"Reconnect in {delay}...", )
+            print(
+                f"Reconnect in {delay}...",
+            )
 
         @worker.friends.on("friend_invite")
         def handle_friend_invite(user: SteamUser):
@@ -324,7 +350,9 @@ class SteamWorker:
                 search_for = mutual
                 # first try getting the friends list of the requesting user
                 try:
-                    resp = client.steamapi.ISteamUser.GetFriendList(steamid=user_steam_id)
+                    resp = client.steamapi.ISteamUser.GetFriendList(
+                        steamid=user_steam_id
+                    )
                 except Exception:
                     try:
                         # if it's private, try getting the friends list of the mutual target
@@ -360,8 +388,8 @@ class SteamWorker:
             self.steam.disconnect()
 
 
-PUNCTUATION_TRANS = str.maketrans(string.punctuation, ' ' * len(string.punctuation))
-WHITESPACE_TRANS = str.maketrans(string.whitespace, ' ' * len(string.whitespace))
+PUNCTUATION_TRANS = str.maketrans(string.punctuation, " " * len(string.punctuation))
+WHITESPACE_TRANS = str.maketrans(string.whitespace, " " * len(string.whitespace))
 
 
 def preprocess_text(text):
@@ -379,7 +407,7 @@ def preprocess_text(text):
     text = text.translate(PUNCTUATION_TRANS)
     text = text.translate(WHITESPACE_TRANS)
     text = text.strip().lower()
-    text = re.sub(' +', ' ', text)
+    text = re.sub(" +", " ", text)
     return text
 
 
@@ -387,6 +415,7 @@ class GameClient(discord.ext.commands.Bot):
     """
     The Discord client for this bot.
     """
+
     steamapi: WebAPI | None
     steamclient: SteamWorker | None
     dotaclient: Dota2Client | None
@@ -408,7 +437,9 @@ class GameClient(discord.ext.commands.Bot):
         self._connector: aiohttp.TCPConnector | None = None
 
         self.current_game: Game | None = None
-        self.current_marks: dict[str, dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]]] = {}
+        self.current_marks: dict[
+            str, dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]]
+        ] = {}
         for game in GAMES:
             self.current_marks[game] = {}
         self.current_match: DotaMatch | Match | None = None
@@ -431,9 +462,7 @@ class GameClient(discord.ext.commands.Bot):
         self.responses_cache.mkdir(exist_ok=True)
         steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
         if steam_api_key is not None:
-            self.steamapi = WebAPI(
-                key=steam_api_key
-            )
+            self.steamapi = WebAPI(key=steam_api_key)
         else:
             self.steamapi = None
         steam_username = os.getenv("GAME_BOT_STEAM_USER")
@@ -476,7 +505,12 @@ class GameClient(discord.ext.commands.Bot):
 
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
-        if not save or self.current_game or self.current_match or not save.get("active"):
+        if (
+            not save
+            or self.current_game
+            or self.current_match
+            or not save.get("active")
+        ):
             return
         try:
             channel = self.guild.get_channel(save["channel"])
@@ -493,7 +527,8 @@ class GameClient(discord.ext.commands.Bot):
                 for k, v in save["group_buckets"].items()
             }
             restored_game.gamer_buckets = {
-                self.guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
+                self.guild.get_member(int(k)): v
+                for k, v in save["gamer_buckets"].items()
             }
             restored_game.timestamp = save["timestamp"]
             restored_game.is_checking = save["is_checking"]
@@ -510,15 +545,24 @@ class GameClient(discord.ext.commands.Bot):
 
     async def restore_match(self):
         save = get_value("match", table=self.backup_table)
-        if not save or self.current_game or self.current_match or not save.get("active"):
+        if (
+            not save
+            or self.current_game
+            or self.current_match
+            or not save.get("active")
+        ):
             return
         try:
             timestamp = save["timestamp"]
-            if utcnow() - timestamp >= datetime.timedelta(seconds=MATCH_MAX_POLL_LENGTH):
+            if utcnow() - timestamp >= datetime.timedelta(
+                seconds=MATCH_MAX_POLL_LENGTH
+            ):
                 return
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
-            gamers = set([self.guild.get_member(gamer_id) for gamer_id in save["gamers"]])
+            gamers = set(
+                [self.guild.get_member(gamer_id) for gamer_id in save["gamers"]]
+            )
             channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.known_matches = save["known_matches"]
@@ -540,7 +584,11 @@ class GameClient(discord.ext.commands.Bot):
                 diff = now - end if now > end else end - now
                 if diff >= datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
                     continue
-                self.current_marks[game][self.guild.get_member(int(gamer_id))] = datetime.datetime.fromisoformat(params[0]), end, params[2]
+                self.current_marks[game][self.guild.get_member(int(gamer_id))] = (
+                    datetime.datetime.fromisoformat(params[0]),
+                    end,
+                    params[2],
+                )
 
     async def on_ready(self):
         guild = None
@@ -565,7 +613,9 @@ class GameClient(discord.ext.commands.Bot):
     async def handle_game_command(self):
         pass
 
-    async def handle_voiceline_command(self, author: discord.Member, channel: discord.TextChannel, content: str):
+    async def handle_voiceline_command(
+        self, author: discord.Member, channel: discord.TextChannel, content: str
+    ):
         # if in voice
         voice_state = author.voice
         if not voice_state or not voice_state.channel:
@@ -575,7 +625,9 @@ class GameClient(discord.ext.commands.Bot):
             responses = self.responses_table.all()
         else:
             response_text = preprocess_text(content)
-            responses = self.responses_table.search(Response.processed_text == response_text)
+            responses = self.responses_table.search(
+                Response.processed_text == response_text
+            )
         if len(responses):
             response = random.choice(responses)
             link = response["response_link"]
@@ -598,7 +650,9 @@ class GameClient(discord.ext.commands.Bot):
                     cache_path.unlink(missing_ok=True)
                     if tries >= 3:
                         print("Failed to download voice response:", repr(e))
-                        await get_channel(channel).send("Error: failed to download response, please try again")
+                        await get_channel(channel).send(
+                            "Error: failed to download response, please try again"
+                        )
                         return
                     await asyncio.sleep(get_backoff(tries))
 
@@ -614,7 +668,12 @@ class GameClient(discord.ext.commands.Bot):
                 voice_client = await voice_channel.connect(self_deaf=True)
 
             def play(path: Path):
-                voice_client.play(discord.FFmpegOpusAudio(str(path)), after=lambda err: asyncio.run_coroutine_threadsafe(disconnect(), self.loop))
+                voice_client.play(
+                    discord.FFmpegOpusAudio(str(path)),
+                    after=lambda err: asyncio.run_coroutine_threadsafe(
+                        disconnect(), self.loop
+                    ),
+                )
 
             async def disconnect():
                 await asyncio.sleep(0.2)
@@ -632,7 +691,9 @@ class GameClient(discord.ext.commands.Bot):
     async def on_app_command_game(self, interaction: discord.Interaction):
         await self.handle_game_command()
 
-    async def on_app_command_voiceline(self, interaction: discord.Interaction, voiceline: str):
+    async def on_app_command_voiceline(
+        self, interaction: discord.Interaction, voiceline: str
+    ):
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
             channel = get_channel(None)
@@ -674,9 +735,7 @@ class GameClient(discord.ext.commands.Bot):
 
                     # consume all args
                     while args:
-                        options = await consume_args(
-                            args, gamer, message, options
-                        )
+                        options = await consume_args(args, gamer, message, options)
                         # if we cleared options, then we stop here
                         if not options:
                             return
@@ -684,21 +743,33 @@ class GameClient(discord.ext.commands.Bot):
                     # it's a mark command
                     if options.remove_mark:
                         if self.current_marks[options.game].pop(gamer, None):
+
                             def clean_mark(old):
                                 old[options.game].pop(str(gamer.id), None)
                                 return old
+
                             update_value(clean_mark, "marks", table=client.backup_table)
                         return
                     if options.start:
-                        self.current_marks[options.game][gamer] = options.start, options.future, options.bucket
+                        self.current_marks[options.game][gamer] = (
+                            options.start,
+                            options.future,
+                            options.bucket,
+                        )
                         saved_marks = {}
                         for game, game_marks in self.current_marks.items():
                             saved_marks[game] = {}
                             for marker, params in game_marks.items():
                                 start, future, min_bucket = params
-                                saved_marks[game][str(marker.id)] = [start.isoformat(), future.isoformat(), min_bucket]
+                                saved_marks[game][str(marker.id)] = [
+                                    start.isoformat(),
+                                    future.isoformat(),
+                                    min_bucket,
+                                ]
                         set_value("marks", saved_marks, table=client.backup_table)
-                        min_bucket, max_bucket = get_bucket_bounds(options.bucket, options.game)
+                        min_bucket, max_bucket = get_bucket_bounds(
+                            options.bucket, options.game
+                        )
                         with_str = get_bucket_str(min_bucket)
                         msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
                         await channel.send(msg)
@@ -722,7 +793,9 @@ class GameClient(discord.ext.commands.Bot):
                         # add to game
                         await self.current_game.add_gamer(gamer, options.bucket)
             else:
-                await self.handle_voiceline_command(message.author, message.channel, message.content)
+                await self.handle_voiceline_command(
+                    message.author, message.channel, message.content
+                )
         except Exception as e:
             print("Unexpected error:", repr(e))
             await get_channel(message.channel).send("An unexpected error occurred.")
@@ -756,7 +829,9 @@ def set_value(key: str, val: TableType, *, table=None):
     Sets to the key value DB table.
     """
     table_interface = table if table is not None else client.db
-    print_debug("set", key, val, table_interface.upsert({"k": key, "v": val}, Store.k == key))
+    print_debug(
+        "set", key, val, table_interface.upsert({"k": key, "v": val}, Store.k == key)
+    )
 
 
 def del_value(key: str, *, table=None):
@@ -767,7 +842,13 @@ def del_value(key: str, *, table=None):
     print_debug("del", key, table_interface.remove(Store.k == key))
 
 
-def update_value(update_fn: Callable[[TableType], TableType], key: str, *, default: TableType = None, table=None) -> TableType:
+def update_value(
+    update_fn: Callable[[TableType], TableType],
+    key: str,
+    *,
+    default: TableType = None,
+    table=None,
+) -> TableType:
     """
     Gets an existing value in the key value DB table and updates it using update_fn.
     :return: The new value
@@ -835,7 +916,7 @@ MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_FIRST = MATCH_POLL_INTERVALS[0]
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLL_LENGTH = 2 * 60 * 60
-MATCH_MAX_POLLS = MATCH_MAX_POLL_LENGTH// MATCH_POLL_INTERVAL_LAST
+MATCH_MAX_POLLS = MATCH_MAX_POLL_LENGTH // MATCH_POLL_INTERVAL_LAST
 MATCH_WAIT_TIME = 60
 
 
@@ -844,77 +925,258 @@ class Match:
 
 
 DOTA_RANKS = {
-    None: ("Unknown", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310"),
-    0: ("Unknown", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310"),
-
-    10: ("Herald", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/Emoticon_Ranked_Herald.png/revision/latest?cb=20190212051846"),
-    11: ("Herald [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/85/SeasonalRank1-1.png/revision/latest?cb=20190130002445"),
-    12: ("Herald [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/ee/SeasonalRank1-2.png/revision/latest?cb=20190130002448"),
-    13: ("Herald [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/0/05/SeasonalRank1-3.png/revision/latest?cb=20190130002457"),
-    14: ("Herald [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/SeasonalRank1-4.png/revision/latest?cb=20190130002500"),
-    15: ("Herald [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2b/SeasonalRank1-5.png/revision/latest?cb=20190130002504"),
-    16: ("Herald [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/94/SeasonalRank1-6.png/revision/latest?cb=20190130002437"),
-    17: ("Herald [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/12/SeasonalRank1-7.png/revision/latest?cb=20190130002441"),
-
-    20: ("Guardian", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/43/Emoticon_Ranked_Guardian.png/revision/latest?cb=20190212051853"),
-    21: ("Guardian [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank2-1.png/revision/latest?cb=20190130002542"),
-    22: ("Guardian [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2c/SeasonalRank2-2.png/revision/latest?cb=20190130002545"),
-    23: ("Guardian [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f5/SeasonalRank2-3.png/revision/latest?cb=20190130002548"),
-    24: ("Guardian [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b4/SeasonalRank2-4.png/revision/latest?cb=20190130002552"),
-    25: ("Guardian [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/32/SeasonalRank2-5.png/revision/latest?cb=20190130002555"),
-    26: ("Guardian [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/72/SeasonalRank2-6.png/revision/latest?cb=20190130002558"),
-    27: ("Guardian [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c6/SeasonalRank2-7.png/revision/latest?cb=20190130002601"),
-
-    30: ("Crusader", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2d/Emoticon_Ranked_Crusader.png/revision/latest?cb=20190212051912"),
-    31: ("Crusader [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/82/SeasonalRank3-1.png/revision/latest?cb=20190130002626"),
-    32: ("Crusader [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6e/SeasonalRank3-2.png/revision/latest?cb=20190130002629"),
-    33: ("Crusader [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/67/SeasonalRank3-3.png/revision/latest?cb=20190130002632"),
-    34: ("Crusader [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank3-4.png/revision/latest?cb=20190130002635"),
-    35: ("Crusader [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b1/SeasonalRank3-5.png/revision/latest?cb=20190130002639"),
-    36: ("Crusader [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611"),
-    37: ("Crusader [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611"),
-
-    40: ("Archon", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/Emoticon_Ranked_Archon.png/revision/latest?cb=20190130004535"),
-    41: ("Archon [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/76/SeasonalRank4-1.png/revision/latest?cb=20190130002704"),
-    42: ("Archon [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank4-2.png/revision/latest?cb=20190130002707"),
-    43: ("Archon [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/60/SeasonalRank4-3.png/revision/latest?cb=20190130002710"),
-    44: ("Archon [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/4a/SeasonalRank4-4.png/revision/latest?cb=20190130002714"),
-    45: ("Archon [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a3/SeasonalRank4-5.png/revision/latest?cb=20190130002718"),
-    46: ("Archon [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/7e/SeasonalRank4-6.png/revision/latest?cb=20190130002651"),
-    47: ("Archon [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/95/SeasonalRank4-7.png/revision/latest?cb=20190130002654"),
-
-    50: ("Legend", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/18/Emoticon_Ranked_Legend.png/revision/latest?cb=20190212051924"),
-    51: ("Legend [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/79/SeasonalRank5-1.png/revision/latest?cb=20190130002757"),
-    52: ("Legend [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/5/52/SeasonalRank5-2.png/revision/latest?cb=20190130002839"),
-    53: ("Legend [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/88/SeasonalRank5-3.png/revision/latest?cb=20190130002819"),
-    54: ("Legend [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/25/SeasonalRank5-4.png/revision/latest?cb=20190130002822"),
-    55: ("Legend [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRank5-5.png/revision/latest?cb=20190130002826"),
-    56: ("Legend [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2f/SeasonalRank5-6.png/revision/latest?cb=20190130002742"),
-    57: ("Legend [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank5-7.png/revision/latest?cb=20190130002745"),
-
-    60: ("Ancient", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/d8/Emoticon_Ranked_Ancient.png/revision/latest?cb=20190216113137"),
-    61: ("Ancient [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e0/SeasonalRank6-1.png/revision/latest?cb=20190130002941"),
-    62: ("Ancient [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/1c/SeasonalRank6-2.png/revision/latest?cb=20190130002945"),
-    63: ("Ancient [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/da/SeasonalRank6-3.png/revision/latest?cb=20190130002948"),
-    64: ("Ancient [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/db/SeasonalRank6-4.png/revision/latest?cb=20190130002951"),
-    65: ("Ancient [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/47/SeasonalRank6-5.png/revision/latest?cb=20190130002955"),
-    66: ("Ancient [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/bd/SeasonalRank6-6.png/revision/latest?cb=20190130002958"),
-    67: ("Ancient [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b8/SeasonalRank6-7.png/revision/latest?cb=20190130003003"),
-
-    70: ("Divine", "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/Emoticon_Ranked_Divine.png/revision/latest?cb=20190130004646"),
-    71: ("Divine [ 1 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b7/SeasonalRank7-1.png/revision/latest?cb=20190130003022"),
-    72: ("Divine [ 2 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8f/SeasonalRank7-2.png/revision/latest?cb=20190130003026"),
-    73: ("Divine [ 3 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/fd/SeasonalRank7-3.png/revision/latest?cb=20190130003029"),
-    74: ("Divine [ 4 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/SeasonalRank7-4.png/revision/latest?cb=20190130003033"),
-    75: ("Divine [ 5 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank7-5.png/revision/latest?cb=20190130003041"),
-    76: ("Divine [ 6 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a1/SeasonalRank7-6.png/revision/latest?cb=20190130003039"),
-    77: ("Divine [ 7 ]", "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c1/SeasonalRank7-7.png/revision/latest?cb=20190130003043"),
-
-    80: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f2/SeasonalRankTop0.png/revision/latest?cb=20180606220529"),
-    81: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/df/SeasonalRankTop1.png/revision/latest?cb=20180606220541"),
-    82: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/ad/SeasonalRankTop2.png/revision/latest?cb=20180606220545"),
-    83: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRankTop3.png/revision/latest?cb=20180606220548"),
-    84: ("Immortal", "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/46/SeasonalRankTop4.png/revision/latest?cb=20180606220552"),
+    None: (
+        "Unknown",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310",
+    ),
+    0: (
+        "Unknown",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e7/SeasonalRank0-0.png/revision/latest?cb=20171124184310",
+    ),
+    10: (
+        "Herald",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/Emoticon_Ranked_Herald.png/revision/latest?cb=20190212051846",
+    ),
+    11: (
+        "Herald [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/85/SeasonalRank1-1.png/revision/latest?cb=20190130002445",
+    ),
+    12: (
+        "Herald [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/ee/SeasonalRank1-2.png/revision/latest?cb=20190130002448",
+    ),
+    13: (
+        "Herald [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/0/05/SeasonalRank1-3.png/revision/latest?cb=20190130002457",
+    ),
+    14: (
+        "Herald [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/SeasonalRank1-4.png/revision/latest?cb=20190130002500",
+    ),
+    15: (
+        "Herald [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2b/SeasonalRank1-5.png/revision/latest?cb=20190130002504",
+    ),
+    16: (
+        "Herald [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/94/SeasonalRank1-6.png/revision/latest?cb=20190130002437",
+    ),
+    17: (
+        "Herald [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/12/SeasonalRank1-7.png/revision/latest?cb=20190130002441",
+    ),
+    20: (
+        "Guardian",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/43/Emoticon_Ranked_Guardian.png/revision/latest?cb=20190212051853",
+    ),
+    21: (
+        "Guardian [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank2-1.png/revision/latest?cb=20190130002542",
+    ),
+    22: (
+        "Guardian [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2c/SeasonalRank2-2.png/revision/latest?cb=20190130002545",
+    ),
+    23: (
+        "Guardian [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f5/SeasonalRank2-3.png/revision/latest?cb=20190130002548",
+    ),
+    24: (
+        "Guardian [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b4/SeasonalRank2-4.png/revision/latest?cb=20190130002552",
+    ),
+    25: (
+        "Guardian [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/32/SeasonalRank2-5.png/revision/latest?cb=20190130002555",
+    ),
+    26: (
+        "Guardian [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/72/SeasonalRank2-6.png/revision/latest?cb=20190130002558",
+    ),
+    27: (
+        "Guardian [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c6/SeasonalRank2-7.png/revision/latest?cb=20190130002601",
+    ),
+    30: (
+        "Crusader",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2d/Emoticon_Ranked_Crusader.png/revision/latest?cb=20190212051912",
+    ),
+    31: (
+        "Crusader [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/82/SeasonalRank3-1.png/revision/latest?cb=20190130002626",
+    ),
+    32: (
+        "Crusader [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6e/SeasonalRank3-2.png/revision/latest?cb=20190130002629",
+    ),
+    33: (
+        "Crusader [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/67/SeasonalRank3-3.png/revision/latest?cb=20190130002632",
+    ),
+    34: (
+        "Crusader [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank3-4.png/revision/latest?cb=20190130002635",
+    ),
+    35: (
+        "Crusader [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b1/SeasonalRank3-5.png/revision/latest?cb=20190130002639",
+    ),
+    36: (
+        "Crusader [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611",
+    ),
+    37: (
+        "Crusader [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank3-6.png/revision/latest?cb=20190130002611",
+    ),
+    40: (
+        "Archon",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/Emoticon_Ranked_Archon.png/revision/latest?cb=20190130004535",
+    ),
+    41: (
+        "Archon [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/76/SeasonalRank4-1.png/revision/latest?cb=20190130002704",
+    ),
+    42: (
+        "Archon [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/87/SeasonalRank4-2.png/revision/latest?cb=20190130002707",
+    ),
+    43: (
+        "Archon [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/60/SeasonalRank4-3.png/revision/latest?cb=20190130002710",
+    ),
+    44: (
+        "Archon [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/4a/SeasonalRank4-4.png/revision/latest?cb=20190130002714",
+    ),
+    45: (
+        "Archon [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a3/SeasonalRank4-5.png/revision/latest?cb=20190130002718",
+    ),
+    46: (
+        "Archon [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/7e/SeasonalRank4-6.png/revision/latest?cb=20190130002651",
+    ),
+    47: (
+        "Archon [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/9/95/SeasonalRank4-7.png/revision/latest?cb=20190130002654",
+    ),
+    50: (
+        "Legend",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/18/Emoticon_Ranked_Legend.png/revision/latest?cb=20190212051924",
+    ),
+    51: (
+        "Legend [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/7/79/SeasonalRank5-1.png/revision/latest?cb=20190130002757",
+    ),
+    52: (
+        "Legend [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/5/52/SeasonalRank5-2.png/revision/latest?cb=20190130002839",
+    ),
+    53: (
+        "Legend [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/88/SeasonalRank5-3.png/revision/latest?cb=20190130002819",
+    ),
+    54: (
+        "Legend [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/25/SeasonalRank5-4.png/revision/latest?cb=20190130002822",
+    ),
+    55: (
+        "Legend [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRank5-5.png/revision/latest?cb=20190130002826",
+    ),
+    56: (
+        "Legend [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/2/2f/SeasonalRank5-6.png/revision/latest?cb=20190130002742",
+    ),
+    57: (
+        "Legend [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c7/SeasonalRank5-7.png/revision/latest?cb=20190130002745",
+    ),
+    60: (
+        "Ancient",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/d8/Emoticon_Ranked_Ancient.png/revision/latest?cb=20190216113137",
+    ),
+    61: (
+        "Ancient [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/e/e0/SeasonalRank6-1.png/revision/latest?cb=20190130002941",
+    ),
+    62: (
+        "Ancient [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/1c/SeasonalRank6-2.png/revision/latest?cb=20190130002945",
+    ),
+    63: (
+        "Ancient [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/da/SeasonalRank6-3.png/revision/latest?cb=20190130002948",
+    ),
+    64: (
+        "Ancient [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/db/SeasonalRank6-4.png/revision/latest?cb=20190130002951",
+    ),
+    65: (
+        "Ancient [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/47/SeasonalRank6-5.png/revision/latest?cb=20190130002955",
+    ),
+    66: (
+        "Ancient [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/bd/SeasonalRank6-6.png/revision/latest?cb=20190130002958",
+    ),
+    67: (
+        "Ancient [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b8/SeasonalRank6-7.png/revision/latest?cb=20190130003003",
+    ),
+    70: (
+        "Divine",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/6/6d/Emoticon_Ranked_Divine.png/revision/latest?cb=20190130004646",
+    ),
+    71: (
+        "Divine [ 1 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/b/b7/SeasonalRank7-1.png/revision/latest?cb=20190130003022",
+    ),
+    72: (
+        "Divine [ 2 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8f/SeasonalRank7-2.png/revision/latest?cb=20190130003026",
+    ),
+    73: (
+        "Divine [ 3 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/fd/SeasonalRank7-3.png/revision/latest?cb=20190130003029",
+    ),
+    74: (
+        "Divine [ 4 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/1/13/SeasonalRank7-4.png/revision/latest?cb=20190130003033",
+    ),
+    75: (
+        "Divine [ 5 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/3/33/SeasonalRank7-5.png/revision/latest?cb=20190130003041",
+    ),
+    76: (
+        "Divine [ 6 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/a1/SeasonalRank7-6.png/revision/latest?cb=20190130003039",
+    ),
+    77: (
+        "Divine [ 7 ]",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/c/c1/SeasonalRank7-7.png/revision/latest?cb=20190130003043",
+    ),
+    80: (
+        "Immortal",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/f/f2/SeasonalRankTop0.png/revision/latest?cb=20180606220529",
+    ),
+    81: (
+        "Immortal",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/df/SeasonalRankTop1.png/revision/latest?cb=20180606220541",
+    ),
+    82: (
+        "Immortal",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/ad/SeasonalRankTop2.png/revision/latest?cb=20180606220545",
+    ),
+    83: (
+        "Immortal",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRankTop3.png/revision/latest?cb=20180606220548",
+    ),
+    84: (
+        "Immortal",
+        "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/46/SeasonalRankTop4.png/revision/latest?cb=20180606220552",
+    ),
 }
 
 DOTA_STATE = {
@@ -945,25 +1207,14 @@ DOTA_ADV_LABELS = {
     "tower_damage": "Tower Damage",
     "scaled_tower_damage": "Real Tower Damage",
     "hero_healing": "Raw Healing",
-    "scaled_hero_healing": "Healing"
+    "scaled_hero_healing": "Healing",
 }
 
 DOTA_EXPECTED_BUILDINGS = [
-    {
-        2: [0]
-    },
-    {
-        0: [1, 2, 3],
-        1: [1, 1]
-    },
-    {
-        0: [1, 2, 3, 4, 4],
-        1: [1, 1]
-    },
-    {
-        0: [1, 2, 3],
-        1: [1, 1]
-    }
+    {2: [0]},
+    {0: [1, 2, 3], 1: [1, 1]},
+    {0: [1, 2, 3, 4, 4], 1: [1, 1]},
+    {0: [1, 2, 3], 1: [1, 1]},
 ]
 
 DOTA_CACHED_CONSTANTS = {}
@@ -981,15 +1232,25 @@ class DotaMatch(Match):
     serialize: bool
     task: TaskWrapper | None
 
-    def __init__(self, account_ids: set[int], gamers: set[discord.Member], channel: discord.TextChannel, should_check: bool = True, serialize: bool = False):
+    def __init__(
+        self,
+        account_ids: set[int],
+        gamers: set[discord.Member],
+        channel: discord.TextChannel,
+        should_check: bool = True,
+        serialize: bool = False,
+    ):
         self.serialize = serialize
         self.account_ids = account_ids
         friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
-        friend_ids = [friend_id.account_id for friend_id in friend_ids if
-                      friend_id
-                      and friend_id in client.steamclient.steam.friends
-                      and client.steamclient.steam.friends[friend_id].relationship == EFriendRelationship.Friend
-                      ]
+        friend_ids = [
+            friend_id.account_id
+            for friend_id in friend_ids
+            if friend_id
+            and friend_id in client.steamclient.steam.friends
+            and client.steamclient.steam.friends[friend_id].relationship
+            == EFriendRelationship.Friend
+        ]
         self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(account_ids)
@@ -1015,12 +1276,14 @@ class DotaMatch(Match):
             "timestamp": self.timestamp,
             "polls": self.polls,
             "channel": self.channel.id,
-            "active": True
+            "active": True,
         }
         set_value("match", data, table=client.backup_table)
 
     def update_timestamp(self):
-        self.timestamp = generate_timestamp(utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST))
+        self.timestamp = generate_timestamp(
+            utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST)
+        )
         self.save()
 
     def start_check(self):
@@ -1054,10 +1317,10 @@ class DotaMatch(Match):
             return
 
         # request spectate for steam server ID
-        client.dotaclient.send(EDOTAGCMsg.EMsgGCSpectateFriendGame, {
-            "steam_id": make_steam64(self.account_id),
-            "live": False
-        })
+        client.dotaclient.send(
+            EDOTAGCMsg.EMsgGCSpectateFriendGame,
+            {"steam_id": make_steam64(self.account_id), "live": False},
+        )
 
         print_debug(f"Querying realtime match stats for {self.account_id}...")
 
@@ -1073,7 +1336,9 @@ class DotaMatch(Match):
                     # this endpoint regularly fails, so we retry a few times
                     tries += 1
                     try:
-                        resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(server_steam_id=str(server_steamid))
+                        resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(
+                            server_steam_id=str(server_steamid)
+                        )
                         print_debug(f"GetRealtimeStats: {resp}")
                         break
                     except Exception as e:
@@ -1096,7 +1361,7 @@ class DotaMatch(Match):
                         "level": 0,
                         "lh_count": 0,
                         "denies_count": 0,
-                    }
+                    },
                 }
                 adv_map = None
                 if teams:
@@ -1120,10 +1385,19 @@ class DotaMatch(Match):
                                 team_id = team_idx
                     if len(per_player_stats) == 2:
                         other_team = (team_id + 1) % 2
-                        net_worth_adv = teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
-                        adv_map = {"level": 0, "net_worth": net_worth_adv, "\u200B": "\u200B"}
+                        net_worth_adv = (
+                            teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
+                        )
+                        adv_map = {
+                            "level": 0,
+                            "net_worth": net_worth_adv,
+                            "\u200B": "\u200B",
+                        }
                         for key in per_player_stats[team_id]:
-                            adv_map[key] = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+                            adv_map[key] = (
+                                per_player_stats[team_id][key]
+                                - per_player_stats[other_team][key]
+                            )
                         adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
@@ -1137,7 +1411,7 @@ class DotaMatch(Match):
                     # team -> lane[] -> type{} -> tier{}
                     destroyed_buildings = {
                         2: deepcopy(DOTA_EXPECTED_BUILDINGS),
-                        3: deepcopy(DOTA_EXPECTED_BUILDINGS)
+                        3: deepcopy(DOTA_EXPECTED_BUILDINGS),
                     }
                     for building in buildings:
                         team = building["team"]
@@ -1206,30 +1480,52 @@ class DotaMatch(Match):
                 if teams and adv_map:
                     radiant_score = teams[0]["score"]
                     dire_score = teams[1]["score"]
-                    embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+                    embed.add_field(
+                        name="Score",
+                        value=f"{radiant_score}-{dire_score}",
+                        inline=False,
+                    )
 
-                    embed.add_field(name="Team", value="Dire" if team_id == 1 else "Radiant", inline=False)
+                    embed.add_field(
+                        name="Team",
+                        value="Dire" if team_id == 1 else "Radiant",
+                        inline=False,
+                    )
 
-                    embed.add_field(name="Team Advantage", value="⎯"*40, inline=False)
+                    embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
                     for k, v in adv_map.items():
                         label = DOTA_ADV_LABELS.get(k, k)
                         embed.add_field(name=label, value=v)
 
                 if buildings_populated:
-                    embed.add_field(name="Building Status", value="⎯"*40, inline=False)
+                    embed.add_field(
+                        name="Building Status", value="⎯" * 40, inline=False
+                    )
 
                     if highest_towers[2]:
-                        embed.add_field(name="Radiant Towers", value=f"Tier {highest_towers[2]} destroyed")
+                        embed.add_field(
+                            name="Radiant Towers",
+                            value=f"Tier {highest_towers[2]} destroyed",
+                        )
                     else:
-                        embed.add_field(name="Radiant Towers", value="No towers destroyed")
+                        embed.add_field(
+                            name="Radiant Towers", value="No towers destroyed"
+                        )
                     if highest_towers[3]:
-                        embed.add_field(name="Dire Towers", value=f"Tier {highest_towers[3]} destroyed")
+                        embed.add_field(
+                            name="Dire Towers",
+                            value=f"Tier {highest_towers[3]} destroyed",
+                        )
                     else:
                         embed.add_field(name="Dire Towers", value="No towers destroyed")
                     embed.add_field(name="\u200B", value="\u200B")
-                    embed.add_field(name="Radiant Barracks", value=f"{rax_count[2]} destroyed")
-                    embed.add_field(name="Dire Barracks", value=f"{rax_count[3]} destroyed")
+                    embed.add_field(
+                        name="Radiant Barracks", value=f"{rax_count[2]} destroyed"
+                    )
+                    embed.add_field(
+                        name="Dire Barracks", value=f"{rax_count[3]} destroyed"
+                    )
                     embed.add_field(name="\u200B", value="\u200B")
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
@@ -1238,7 +1534,11 @@ class DotaMatch(Match):
             elif live_result == 4 or live_result == 0:
                 create_task(channel.send("No live match found."))
             else:
-                create_task(channel.send(f"Failed to get live match data: error code {live_result}"))
+                create_task(
+                    channel.send(
+                        f"Failed to get live match data: error code {live_result}"
+                    )
+                )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
 
@@ -1321,16 +1621,22 @@ class DotaMatch(Match):
             embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
 
             # match type
-            embed.add_field(name="Type", value=DotaMatch.get_type(match_details), inline=False)
+            embed.add_field(
+                name="Type", value=DotaMatch.get_type(match_details), inline=False
+            )
 
             # score
             if match_details:
                 radiant_score = match_details["radiant_score"]
                 dire_score = match_details["dire_score"]
-                embed.add_field(name="Score", value=f"{radiant_score}-{dire_score}", inline=False)
+                embed.add_field(
+                    name="Score", value=f"{radiant_score}-{dire_score}", inline=False
+                )
 
             # team
-            embed.add_field(name="Team", value="Dire" if is_dire else "Radiant", inline=False)
+            embed.add_field(
+                name="Team", value="Dire" if is_dire else "Radiant", inline=False
+            )
 
             if match_details:
                 adv_map = {
@@ -1353,7 +1659,7 @@ class DotaMatch(Match):
                 adv_map["xp_per_min"] *= match_details["duration"] / 60.0
                 adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
 
-                embed.add_field(name="Team Advantage", value="⎯"*40, inline=False)
+                embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
                 for k, v in adv_map.items():
                     label = DOTA_ADV_LABELS[k]
@@ -1369,7 +1675,9 @@ class DotaMatch(Match):
             embed.set_author(name=rank, icon_url=rank_icon)
 
             # duration
-            embed.set_footer(text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}")
+            embed.set_footer(
+                text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}"
+            )
 
             # send
             await self.channel.send(embed=embed)
@@ -1473,7 +1781,7 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
-            "active": True
+            "active": True,
         }
         set_value("saved", data, table=client.backup_table)
 
@@ -1525,7 +1833,11 @@ class Game:
         countdown = max(MIN_CHECK_COUNTDOWN, self.get_delta_seconds())
         self.is_checking = countdown <= MAX_CHECK_COUNTDOWN
         if not self.is_checking:
-            mapped = interp(countdown, (MIN_CHECK_SCALING, MAX_CHECK_SCALING), (MIN_CHECK_COUNTDOWN, MAX_CHECK_COUNTDOWN))
+            mapped = interp(
+                countdown,
+                (MIN_CHECK_SCALING, MAX_CHECK_SCALING),
+                (MIN_CHECK_COUNTDOWN, MAX_CHECK_COUNTDOWN),
+            )
             clamped = max(MIN_CHECK_COUNTDOWN, min(MAX_CHECK_COUNTDOWN, mapped))
             self.check_delta = datetime.timedelta(seconds=clamped)
         if self.was_scheduled is None:
@@ -1697,9 +2009,7 @@ class Game:
                             account_ids.add(player["steam"])
                     if account_ids:
                         client.current_match = DotaMatch(
-                            account_ids=account_ids,
-                            gamers=gamers,
-                            channel=self.channel
+                            account_ids=account_ids, gamers=gamers, channel=self.channel
                         )
             else:
                 print_debug("Starting check")
@@ -1711,7 +2021,9 @@ class Game:
         else:
             print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
-            no_gamers_consecutive = update_value(increment, "no_gamers_consecutive", default=0)
+            no_gamers_consecutive = update_value(
+                increment, "no_gamers_consecutive", default=0
+            )
             await self.channel.send(
                 f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row)."
             )
@@ -1878,9 +2190,7 @@ def try_steam_id(steam_id: str | int) -> SteamID | None:
         return None
 
 
-def process_in(
-        args: list[str]
-) -> datetime.datetime | None:
+def process_in(args: list[str]) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
         args.pop(0)
@@ -1959,9 +2269,8 @@ def process_in(
 def mapreduce_at(args: list[list[str]]):
     pass
 
-def process_at(
-    args: list[str]
-) -> datetime.datetime | None:
+
+def process_at(args: list[str]) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
         args.pop(0)
@@ -2004,15 +2313,15 @@ def process_at(
             # if UTC time is in the next day, we need to act like we're getting a time in the past
             # because our local time zone is in the previous day, likewise with future
             if (
-                    client.now.day > local_now.day
-                    or client.now.month > local_now.month
-                    or client.now.year > local_now.year
+                client.now.day > local_now.day
+                or client.now.month > local_now.month
+                or client.now.year > local_now.year
             ):
                 settings["PREFER_DATES_FROM"] = "past"
             elif (
-                    client.now.day < local_now.day
-                    or client.now.month < local_now.month
-                    or client.now.year < local_now.year
+                client.now.day < local_now.day
+                or client.now.month < local_now.month
+                or client.now.year < local_now.year
             ):
                 settings["PREFER_DATES_FROM"] = "future"
         else:
@@ -2033,9 +2342,7 @@ def process_at(
     # consume our peeked inputs to the date
     del args[:new_start]
     if confirmed_date and confirmed_date.tzinfo is None:
-        confirmed_date = confirmed_date.replace(
-            tzinfo=TIMESTAMP_TIMEZONE
-        )
+        confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
     return confirmed_date
 
 
@@ -2078,13 +2385,17 @@ async def consume_args(
     else:
         # sometimes users accidentally try to control a game when it doesn't exist
         if control in CURRENT_GAME_ARGS:
-            await channel.send(f"Cannot control a {KEYWORD} when there is none currently active.")
+            await channel.send(
+                f"Cannot control a {KEYWORD} when there is none currently active."
+            )
             return None
         # future date handling
         if options.future is None:
             if control == "at":
                 if not args:
-                    await channel.send(f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm")
+                    await channel.send(
+                        f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm"
+                    )
                     return None
                 confirmed_date = process_at(args)
                 if confirmed_date:
@@ -2092,7 +2403,9 @@ async def consume_args(
                 return options
             if control == "in":
                 if not args:
-                    await channel.send(f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes")
+                    await channel.send(
+                        f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes"
+                    )
                     return None
                 confirmed_date = process_in(args)
                 if confirmed_date:
@@ -2100,7 +2413,9 @@ async def consume_args(
                 return options
         if control == "on":
             if not args:
-                await channel.send(f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}")
+                await channel.send(
+                    f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}"
+                )
                 return None
             game = args.pop(0).lower()
             if game in GAMES:
@@ -2109,7 +2424,9 @@ async def consume_args(
 
     if control == "register":
         if not args:
-            await channel.send(f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567")
+            await channel.send(
+                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567"
+            )
             return None
         id_arg = args.pop(0)
         # try to parse a Steam ID if there is one
@@ -2155,7 +2472,9 @@ async def consume_args(
         if not steam_id:
             await channel.send("Steam ID not found.")
             return None
-        client.players_table.upsert({"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id)
+        client.players_table.upsert(
+            {"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id
+        )
         await channel.send("Steam ID linked. Matches will now be listed.")
         return None
     if control == "option":
@@ -2163,7 +2482,9 @@ async def consume_args(
             await channel.send("Not permitted to set/get options.")
             return None
         if not args:
-            await channel.send(f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789")
+            await channel.send(
+                f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789"
+            )
             return None
         option_mode = args.pop(0).lower()
         option = args.pop(0).lower()
@@ -2182,12 +2503,16 @@ async def consume_args(
                 del_value(option, table=client.settings_table)
                 await channel.send(f"{option}=null")
         else:
-            await channel.send(f"{option}={get_value(option, table=client.settings_table)}")
+            await channel.send(
+                f"{option}={get_value(option, table=client.settings_table)}"
+            )
         return None
     # if buckets
     if control == "if":
         if not args:
-            await channel.send(f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3")
+            await channel.send(
+                f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3"
+            )
             return None
         options.bucket = get_int(args.pop(0), BUCKET_MIN)
         return options
@@ -2210,7 +2535,9 @@ async def consume_args(
                     options.start = start_datetime
                     options.future = end_datetime
                     return options
-        await channel.send(f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours")
+        await channel.send(
+            f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours"
+        )
         return None
 
     if control == "status":
@@ -2227,7 +2554,13 @@ async def consume_args(
                 player = client.players_table.get(Player.id == member.id)
                 if player:
                     account_id = player["steam"]
-                    match = DotaMatch({account_id}, {member}, channel, should_check=False, serialize=False)
+                    match = DotaMatch(
+                        {account_id},
+                        {member},
+                        channel,
+                        should_check=False,
+                        serialize=False,
+                    )
         if match and client.steamapi:
             async with channel.typing():
                 match.query_realtime(channel, gamer.id)
@@ -2237,7 +2570,9 @@ async def consume_args(
 
     # if we didn't find the control, it's an invalid command
     arguments = KEYWORD + " " + control + " " + " ".join(args)
-    await channel.send(f"Unrecognized input \"{arguments}\", please check the usage of the command.")
+    await channel.send(
+        f'Unrecognized input "{arguments}", please check the usage of the command.'
+    )
     return None
 
 
@@ -2285,7 +2620,12 @@ async def main(debug, no_2fa):
 
     # create opendota API HTTP client
     async with (
-        httpx.AsyncClient(base_url="https://api.opendota.com/api", timeout=10.0, http2=True, auth=opendota_api_key) as opendota,
+        httpx.AsyncClient(
+            base_url="https://api.opendota.com/api",
+            timeout=10.0,
+            http2=True,
+            auth=opendota_api_key,
+        ) as opendota,
         httpx.AsyncClient(timeout=10.0, http2=True) as http_client,
     ):
         # create our client, limit messages to what we need to keep track of
@@ -2344,6 +2684,7 @@ if __name__ == "__main__":
     # TODO: arg parse
     if PROFILING:
         import yappi
+
         yappi.set_context_backend("greenlet")
         yappi.set_clock_type("cpu")
         yappi.start(builtins=True)
