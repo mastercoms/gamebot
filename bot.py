@@ -2318,6 +2318,7 @@ def mapreduce_at(args: list[list[str]]):
 
 
 MONTHS = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'November', 'december'}
+NEXT_PERIOD = datetime.timedelta(hours=12)
 
 
 def process_at(args: list[str]) -> datetime.datetime | None:
@@ -2340,12 +2341,19 @@ def process_at(args: list[str]) -> datetime.datetime | None:
         # combine if space
         if last > end + 1:
             period = args[end + 1].lower()
-            if period == "pm" or period == "am" or period == "p" or period == "a":
+            if period == "pm" or period == "am" or period == "p" or period == "a" or period == "z":
                 word += period
                 end += 1
         local_now = client.now.astimezone(LOCAL_TZINFO)
         if word[0] in NUMERIC:
-            numeric = get_int(word, None)
+            # have to take leading zero off
+            if word[0] == "0":
+                time_word = word[1:]
+                has_leading_zero = True
+            else:
+                time_word = word
+                has_leading_zero = False
+            numeric = get_int(time_word, None)
             # whole number, it could be part of a date, not a time
             is_time = True
             is_24_hour = False
@@ -2353,23 +2361,36 @@ def process_at(args: list[str]) -> datetime.datetime | None:
                 # Can't have January 12am or 24:00
                 if last_word in MONTHS or numeric > 23:
                     is_time = False
-                elif numeric > 13:
+                elif numeric > 12:
                     is_24_hour = True
             if is_time:
                 if is_24_hour:
                     just_time = word
                 else:
-                    # use pm and am, not p or a
+                    if word.endswith("z"):
+                        is_24_hour = True
+                        word = word[:-1]
+                    is_24_hour = is_24_hour or has_leading_zero
                     if word.endswith(("p", "a")):
+                        # use pm and am, not p or a
                         word += "m"
+                        is_24_hour = False
                     elif not word.endswith("pm") and not word.endswith("am"):
-                        # if there's no period at all, just autodetect based on current
-                        # TODO: probably want to detect if the time has past, so we can flip am or pm
-                        word += "am" if local_now.hour < 12 else "pm"
-                    just_time = word[:-2]
+                        if not is_24_hour:
+                            # if there's no period at all, just autodetect based on current (if not 24 hour)
+                            # see the end of the function to see handling if we get it wrong
+                            word += "am" if local_now.hour < 12 else "pm"
+                    else:
+                        is_24_hour = False
+                    if is_24_hour:
+                        just_time = word
+                    else:
+                        just_time = word[:-2]
                 # if it's just a single int representing the hour, normalize it into a full time
                 if get_int(just_time, None) is not None:
-                    word = just_time + ":00" + word[-2:]
+                    word = just_time + ":00"
+                    if not is_24_hour:
+                        word += word[-2:]
         date_string += " " + word if date_string else word
         if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
             settings = {
@@ -2412,6 +2433,9 @@ def process_at(args: list[str]) -> datetime.datetime | None:
     del args[:new_start]
     if confirmed_date and confirmed_date.tzinfo is None:
         confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
+    # if we got it wrong, advance from AM -> PM (or PM -> AM)
+    if confirmed_date and client.now > confirmed_date:
+        res += NEXT_PERIOD
     return confirmed_date
 
 
@@ -2424,6 +2448,7 @@ def process_time_control(control: str, args: list[str]) -> datetime.datetime | N
 
 
 CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
+START_GAME_ARGS = {"at", "in", "on"}
 
 
 async def consume_args(
@@ -2442,6 +2467,12 @@ async def consume_args(
     channel = get_channel(message.channel)
     # if there's a game, try to control it
     if client.current_game:
+        # sometimes users accidentally try to start a game when it's running
+        if control in START_GAME_ARGS:
+            await channel.send(
+                f"Cannot start a {KEYWORD} when there is already one currently active.",
+            )
+            return None
         if control == "cancel":
             await client.current_game.cancel(created_at)
             return None
