@@ -5,6 +5,7 @@ verify_ssl = true
 
 [dev-packages]
 black = "*"
+ruff = "*"
 
 [packages]
 "discord.py" = {extras = ["speed", "voice"], version = "*"}
@@ -29,6 +30,9 @@ numpy = "*"
 gevent = "*"
 aiodns = "*"
 yappi = "*"
+black = "*"
+mypy = "*"
+isort = "*"
 
 [requires]
 python_version = "3.11"

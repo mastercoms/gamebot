@@ -1,0 +1,18 @@
+select = ["ALL"]
+ignore = [
+  "T",
+  "SLF",
+  "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
+  "E402", "E501",
+  "D",
+  "ANN",
+  "RET504", "RET505", "RET506", "RET507", "RET508",
+  "BLE001",
+  "C901",
+  "PTH",
+  "ARG",
+  "FBT001", "FBT002",
+  "PLW0603",
+  "TRY300", "TRY301",
+  "S110",
+]
