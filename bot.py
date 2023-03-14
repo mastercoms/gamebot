@@ -516,6 +516,15 @@ class GameClient(discord.ext.commands.Bot):
 
         self.lock = asyncio.Lock()
 
+    async def close(self) -> None:
+        """
+        Closes the client.
+        """
+        await self._resolver.close()
+        await self._connector.close()
+        self.steamclient.close()
+        await super().close()
+
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
         if (
@@ -2686,9 +2695,10 @@ async def main(debug, no_2fa):
 
         # start the client
         async with client as _client:
-            await _client.start(os.environ["GAME_BOT_TOKEN"])
-
-    client.steamclient.close()
+            try:
+                await _client.start(os.environ["GAME_BOT_TOKEN"])
+            except:
+                pass
 
 
 if os.name == "nt":
@@ -2719,7 +2729,7 @@ def start_bot(*, debug: bool, no_2fa: bool) -> None:
     asyncio.run(main(debug, no_2fa))
 
 
-PROFILING = False
+PROFILING = True
 
 if __name__ == "__main__":
     # TODO: arg parse
@@ -2729,7 +2739,10 @@ if __name__ == "__main__":
         yappi.set_context_backend("greenlet")
         yappi.set_clock_type("cpu")
         yappi.start(builtins=True)
-    start_bot(debug=False, no_2fa=True)
     if PROFILING:
-        yappi.stop()
+        with yappi.run():
+            start_bot(debug=False, no_2fa=True)
         yappi.get_func_stats().print_all()
+        yappi.get_greenlet_stats().print_all()
+    else:
+        start_bot(debug=False, no_2fa=True)

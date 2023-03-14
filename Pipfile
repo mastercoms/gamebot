@@ -33,6 +33,7 @@ yappi = "*"
 black = "*"
 mypy = "*"
 isort = "*"
+cffi = "*"
 
 [requires]
 python_version = "3.11"
