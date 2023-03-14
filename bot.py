@@ -2388,9 +2388,10 @@ def process_at(args: list[str]) -> datetime.datetime | None:
                         just_time = word[:-2]
                 # if it's just a single int representing the hour, normalize it into a full time
                 if get_int(just_time, None) is not None:
-                    word = just_time + ":00"
-                    if not is_24_hour:
-                        word += word[-2:]
+                    if is_24_hour:
+                        word = just_time + ":00"
+                    else:
+                        word = just_time + ":00" + word[-2:]
         date_string += " " + word if date_string else word
         if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
             settings = {
