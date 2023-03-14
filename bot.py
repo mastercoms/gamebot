@@ -31,6 +31,7 @@ import dateparser
 import discord
 import httpx
 import orjson
+import pytz
 from BetterJSONStorage import BetterJSONStorage
 from discord import AllowedMentions, Intents
 from discord.ext.commands import MemberNotFound
@@ -470,6 +471,7 @@ class GameClient(discord.ext.commands.Bot):
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
+        self.timezone_table = self.db.table("timezone")
         self.responses_table = TinyDB(Path("responses.db"), storage=BetterJSONStorage)
         self.responses_cache = Path("./responses_cache")
         self.responses_cache.mkdir(exist_ok=True)
@@ -892,7 +894,7 @@ def update_value(
     return new
 
 
-TIMESTAMP_TIMEZONE = datetime.timezone.utc
+TIMESTAMP_TIMEZONE = pytz.utc
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
 TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
 
@@ -2321,7 +2323,7 @@ MONTHS = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'augus
 NEXT_PERIOD = datetime.timedelta(hours=12)
 
 
-def process_at(args: list[str]) -> datetime.datetime | None:
+def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
         args.pop(0)
@@ -2332,6 +2334,12 @@ def process_at(args: list[str]) -> datetime.datetime | None:
     new_start = 0
     last = len(args)
     confirmed_date = None
+    the_timezone = get_value(str(gamer.id), default=None, table=client.tz_table)
+    if the_timezone is None:
+        the_timezone = LOCAL_TZINFO
+    else:
+        the_timezone = timezone(the_timezone)
+    local_now = client.now.astimezone(the_timezone)
     # go through until we get a date
     while True:
         word = args[end].lower()
@@ -2344,8 +2352,8 @@ def process_at(args: list[str]) -> datetime.datetime | None:
             if period == "pm" or period == "am" or period == "p" or period == "a" or period == "z":
                 word += period
                 end += 1
-        local_now = client.now.astimezone(LOCAL_TZINFO)
         if word[0] in NUMERIC:
+            is_tz_str = False
             # have to take leading zero off
             if word[0] == "0":
                 time_word = word[1:]
@@ -2392,10 +2400,26 @@ def process_at(args: list[str]) -> datetime.datetime | None:
                         word = just_time + ":00"
                     else:
                         word = just_time + ":00" + word[-2:]
-        date_string += " " + word if date_string else word
-        if LOCAL_TIMEZONE != TIMESTAMP_TIMEZONE:
+        elif word in pytz.all_timezones_set:
+            is_tz_str = True
+        if is_tz_str:
+            new_timezone = timezone(word)
+            if new_timezone != the_timezone:
+                new_now = client.now.astimezone(the_timezone)
+                new_timezone_am = new_now.hour < 12
+                local_timezone_am = local_now.hour < 12
+                if new_timezone_am != local_timezone_am:
+                    if new_timezone_am:
+                        date_string.replace("pm", "am")
+                    else:
+                        date_string.replace("am", "pm")
+                local_now = new_now
+                the_timezone = timezone(word)
+        else:
+            date_string += " " + word if date_string else word
+        if the_timezone != TIMESTAMP_TIMEZONE:
             settings = {
-                "TIMEZONE": LOCAL_TIMEZONE,
+                "TIMEZONE": the_timezone.zone,
                 "TO_TIMEZONE": "UTC",
             }
             # if UTC time is in the next day, we need to act like we're getting a time in the past
@@ -2440,9 +2464,9 @@ def process_at(args: list[str]) -> datetime.datetime | None:
     return confirmed_date
 
 
-def process_time_control(control: str, args: list[str]) -> datetime.datetime | None:
+def process_time_control(control: str, args: list[str], gamer: discord.Member) -> datetime.datetime | None:
     if control == "at":
-        return process_at(args)
+        return process_at(args, gamer)
     if control == "in":
         return process_in(args)
     return None
@@ -2498,7 +2522,7 @@ async def consume_args(
                         f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
                     )
                     return None
-                confirmed_date = process_at(args)
+                confirmed_date = process_at(args, gamer)
                 if confirmed_date:
                     options.future = confirmed_date
                 return options
@@ -2579,6 +2603,17 @@ async def consume_args(
         )
         await channel.send("Steam ID linked. Matches will now be listed.")
         return None
+    if control == "timezone":
+        if args:
+            my_tz = args.pop(0)
+            if my_tz in pytz.all_timezones_set:
+                my_tz = timezone(my_tz)
+                set_value(str(gamer.id), my_tz.zone, table=client.timezone_table)
+                return None
+        await channel.send(
+            f"{KEYWORD} timezone <timezone>\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n\n**Example:** {KEYWORD} timezone EST",
+        )
+        return None
     if control == "option":
         if not gamer.guild_permissions.administrator:
             await channel.send("Not permitted to set/get options.")
@@ -2625,14 +2660,14 @@ async def consume_args(
             if time_control == "rm" or time_control == "remove":
                 options.remove_mark = True
                 return options
-            start_datetime = process_time_control(time_control, args)
+            start_datetime = process_time_control(time_control, args, gamer)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
                 if sep == "to" and args:
                     time_control = args.pop(0).lower()
                     if args:
-                        end_datetime = process_time_control(time_control, args)
+                        end_datetime = process_time_control(time_control, args, gamer)
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
