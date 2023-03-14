@@ -133,24 +133,29 @@ class DiscordUtil:
 
     @staticmethod
     async def query_member_named(
-        guild: discord.Guild, argument: str
+        guild: discord.Guild,
+        argument: str,
     ) -> discord.Member | None:
         cache = guild._state.member_cache_flags.joined
         if len(argument) > 5 and argument[-5] == "#":
             username, _, discriminator = argument.rpartition("#")
             members = await guild.query_members(username, limit=100, cache=cache)
             return discord.utils.get(
-                members, name=username, discriminator=discriminator
+                members,
+                name=username,
+                discriminator=discriminator,
             )
         else:
             members = await guild.query_members(argument, limit=100, cache=cache)
             return discord.utils.find(
-                lambda m: m.name == argument or m.nick == argument, members
+                lambda m: m.name == argument or m.nick == argument,
+                members,
             )
 
     @staticmethod
     async def query_member_by_id(
-        guild: discord.Guild, user_id: int
+        guild: discord.Guild,
+        user_id: int,
     ) -> discord.Member | None:
         ws = client._get_websocket(shard_id=guild.shard_id)
         cache = guild._state.member_cache_flags.joined
@@ -174,10 +179,12 @@ class DiscordUtil:
 
     @staticmethod
     async def convert_user_arg(
-        message: discord.Message, argument: str
+        message: discord.Message,
+        argument: str,
     ) -> discord.Member | None:
         match = DiscordUtil._get_id_match(argument) or re.match(
-            r"<@!?(\d{15,20})>$", argument
+            r"<@!?(\d{15,20})>$",
+            argument,
         )
         result = None
         guild = client.guild
@@ -191,7 +198,8 @@ class DiscordUtil:
             user_id = int(match.group(1))
             if guild:
                 result = guild.get_member(user_id) or discord.utils.get(
-                    message.mentions, id=user_id
+                    message.mentions,
+                    id=user_id,
                 )
 
         if not isinstance(result, discord.Member):
@@ -218,7 +226,7 @@ class DotaAPI:
     @staticmethod
     async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
         async with httpx.AsyncClient(
-            base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/"
+            base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/",
         ) as odotagh:
             for res in resources:
                 url = f"{res}.json"
@@ -234,7 +242,9 @@ class DotaAPI:
 
     @staticmethod
     def query_constant_name(
-        constants: dict[str, dict[str, Any]], resource: str, idx: int
+        constants: dict[str, dict[str, Any]],
+        resource: str,
+        idx: int,
     ) -> str:
         constant = constants[resource]
         data = constant.get(str(idx), constant["0"])
@@ -242,7 +252,9 @@ class DotaAPI:
 
     @staticmethod
     def query_match_constant(
-        constants: dict[str, dict[str, Any]], match: dict[str, Any], resource: str
+        constants: dict[str, dict[str, Any]],
+        match: dict[str, Any],
+        resource: str,
     ):
         return DotaAPI.query_constant_name(constants, resource, match[resource])
 
@@ -254,7 +266,8 @@ class DotaAPI:
             tries += 1
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchHistory(
-                    account_id=str(account_id), **params
+                    account_id=str(account_id),
+                    **params,
                 )
                 break
             except Exception as e:
@@ -280,7 +293,8 @@ class DotaAPI:
             tries += 1
             try:
                 resp = client.steamapi.IDOTA2Match_570.GetMatchDetails(
-                    match_id=str(match_id), include_persona_names=True
+                    match_id=str(match_id),
+                    include_persona_names=True,
                 )
                 print_debug(f"get_match: {resp}")
                 break
@@ -351,7 +365,7 @@ class SteamWorker:
                 # first try getting the friends list of the requesting user
                 try:
                     resp = client.steamapi.ISteamUser.GetFriendList(
-                        steamid=user_steam_id
+                        steamid=user_steam_id,
                     )
                 except Exception:
                     try:
@@ -394,6 +408,7 @@ WHITESPACE_TRANS = str.maketrans(string.whitespace, " " * len(string.whitespace)
 
 def preprocess_text(text):
     """Method for pre-processing the given response text.
+
     It:
     * replaces all punctuations with spaces
     * replaces all whitespace characters (tab, newline etc) with spaces
@@ -401,8 +416,7 @@ def preprocess_text(text):
     * removes double spaces
     * changes to lowercase
     :param text: the text to be cleaned
-    :return: cleaned text
-    """
+    :return: cleaned text"""
 
     text = text.translate(PUNCTUATION_TRANS)
     text = text.translate(WHITESPACE_TRANS)
@@ -412,9 +426,7 @@ def preprocess_text(text):
 
 
 class GameClient(discord.ext.commands.Bot):
-    """
-    The Discord client for this bot.
-    """
+    """The Discord client for this bot."""
 
     steamapi: WebAPI | None
     steamclient: SteamWorker | None
@@ -438,7 +450,8 @@ class GameClient(discord.ext.commands.Bot):
 
         self.current_game: Game | None = None
         self.current_marks: dict[
-            str, dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]]
+            str,
+            dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]],
         ] = {}
         for game in GAMES:
             self.current_marks[game] = {}
@@ -555,7 +568,7 @@ class GameClient(discord.ext.commands.Bot):
         try:
             timestamp = save["timestamp"]
             if utcnow() - timestamp >= datetime.timedelta(
-                seconds=MATCH_MAX_POLL_LENGTH
+                seconds=MATCH_MAX_POLL_LENGTH,
             ):
                 return
             print_debug("Resuming match", save)
@@ -612,7 +625,10 @@ class GameClient(discord.ext.commands.Bot):
         pass
 
     async def handle_voiceline_command(
-        self, author: discord.Member, channel: discord.TextChannel, content: str
+        self,
+        author: discord.Member,
+        channel: discord.TextChannel,
+        content: str,
     ):
         # if in voice
         voice_state = author.voice
@@ -624,7 +640,7 @@ class GameClient(discord.ext.commands.Bot):
         else:
             response_text = preprocess_text(content)
             responses = self.responses_table.search(
-                Response.processed_text == response_text
+                Response.processed_text == response_text,
             )
         if len(responses):
             response = random.choice(responses)
@@ -649,7 +665,7 @@ class GameClient(discord.ext.commands.Bot):
                     if tries >= 3:
                         print("Failed to download voice response:", repr(e))
                         await get_channel(channel).send(
-                            "Error: failed to download response, please try again"
+                            "Error: failed to download response, please try again",
                         )
                         return
                     await asyncio.sleep(get_backoff(tries))
@@ -669,7 +685,8 @@ class GameClient(discord.ext.commands.Bot):
                 voice_client.play(
                     discord.FFmpegOpusAudio(str(path)),
                     after=lambda err: asyncio.run_coroutine_threadsafe(
-                        disconnect(), self.loop
+                        disconnect(),
+                        self.loop,
                     ),
                 )
 
@@ -690,7 +707,9 @@ class GameClient(discord.ext.commands.Bot):
         await self.handle_game_command()
 
     async def on_app_command_voiceline(
-        self, interaction: discord.Interaction, voiceline: str
+        self,
+        interaction: discord.Interaction,
+        voiceline: str,
     ):
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
@@ -766,7 +785,8 @@ class GameClient(discord.ext.commands.Bot):
                                 ]
                         set_value("marks", saved_marks, table=client.backup_table)
                         min_bucket, max_bucket = get_bucket_bounds(
-                            options.bucket, options.game
+                            options.bucket,
+                            options.game,
                         )
                         with_str = get_bucket_str(min_bucket)
                         msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
@@ -792,7 +812,9 @@ class GameClient(discord.ext.commands.Bot):
                         await self.current_game.add_gamer(gamer, options.bucket)
             else:
                 await self.handle_voiceline_command(
-                    message.author, message.channel, message.content
+                    message.author,
+                    message.channel,
+                    message.content,
                 )
         except Exception as e:
             print("Unexpected error:", repr(e))
@@ -828,7 +850,10 @@ def set_value(key: str, val: TableType, *, table=None):
     """
     table_interface = table if table is not None else client.db
     print_debug(
-        "set", key, val, table_interface.upsert({"k": key, "v": val}, Store.k == key)
+        "set",
+        key,
+        val,
+        table_interface.upsert({"k": key, "v": val}, Store.k == key),
     )
 
 
@@ -1280,7 +1305,7 @@ class DotaMatch(Match):
 
     def update_timestamp(self):
         self.timestamp = generate_timestamp(
-            utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST)
+            utcnow() - datetime.timedelta(seconds=MATCH_POLL_INTERVAL_FIRST),
         )
         self.save()
 
@@ -1335,7 +1360,7 @@ class DotaMatch(Match):
                     tries += 1
                     try:
                         resp = client.steamapi.IDOTA2MatchStats_570.GetRealtimeStats(
-                            server_steam_id=str(server_steamid)
+                            server_steam_id=str(server_steamid),
                         )
                         print_debug(f"GetRealtimeStats: {resp}")
                         break
@@ -1498,7 +1523,9 @@ class DotaMatch(Match):
 
                 if buildings_populated:
                     embed.add_field(
-                        name="Building Status", value="⎯" * 40, inline=False
+                        name="Building Status",
+                        value="⎯" * 40,
+                        inline=False,
                     )
 
                     if highest_towers[2]:
@@ -1508,7 +1535,8 @@ class DotaMatch(Match):
                         )
                     else:
                         embed.add_field(
-                            name="Radiant Towers", value="No towers destroyed"
+                            name="Radiant Towers",
+                            value="No towers destroyed",
                         )
                     if highest_towers[3]:
                         embed.add_field(
@@ -1519,10 +1547,12 @@ class DotaMatch(Match):
                         embed.add_field(name="Dire Towers", value="No towers destroyed")
                     embed.add_field(name="\u200B", value="\u200B")
                     embed.add_field(
-                        name="Radiant Barracks", value=f"{rax_count[2]} destroyed"
+                        name="Radiant Barracks",
+                        value=f"{rax_count[2]} destroyed",
                     )
                     embed.add_field(
-                        name="Dire Barracks", value=f"{rax_count[3]} destroyed"
+                        name="Dire Barracks",
+                        value=f"{rax_count[3]} destroyed",
                     )
                     embed.add_field(name="\u200B", value="\u200B")
 
@@ -1534,8 +1564,8 @@ class DotaMatch(Match):
             else:
                 create_task(
                     channel.send(
-                        f"Failed to get live match data: error code {live_result}"
-                    )
+                        f"Failed to get live match data: error code {live_result}",
+                    ),
                 )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
@@ -1620,7 +1650,9 @@ class DotaMatch(Match):
 
             # match type
             embed.add_field(
-                name="Type", value=DotaMatch.get_type(match_details), inline=False
+                name="Type",
+                value=DotaMatch.get_type(match_details),
+                inline=False,
             )
 
             # score
@@ -1628,12 +1660,16 @@ class DotaMatch(Match):
                 radiant_score = match_details["radiant_score"]
                 dire_score = match_details["dire_score"]
                 embed.add_field(
-                    name="Score", value=f"{radiant_score}-{dire_score}", inline=False
+                    name="Score",
+                    value=f"{radiant_score}-{dire_score}",
+                    inline=False,
                 )
 
             # team
             embed.add_field(
-                name="Team", value="Dire" if is_dire else "Radiant", inline=False
+                name="Team",
+                value="Dire" if is_dire else "Radiant",
+                inline=False,
             )
 
             if match_details:
@@ -1674,7 +1710,7 @@ class DotaMatch(Match):
 
             # duration
             embed.set_footer(
-                text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}"
+                text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}",
             )
 
             # send
@@ -1919,7 +1955,7 @@ class Game:
                 if 5 < countdown < MIN_CHECK_COUNTDOWN:
                     print_debug("Refreshing countdown from add_gamer")
                     missing_countdown = datetime.timedelta(
-                        seconds=MIN_CHECK_COUNTDOWN - self.get_delta_seconds()
+                        seconds=MIN_CHECK_COUNTDOWN - self.get_delta_seconds(),
                     )
                     await self.refresh(self.future + missing_countdown)
             else:
@@ -1993,7 +2029,7 @@ class Game:
                 print_debug("Finishing check")
                 # finish the game
                 await self.channel.send(
-                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/5** players ready to {KEYWORD}."
+                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/5** players ready to {KEYWORD}.",
                 )
                 # we had a game
                 set_value("no_gamers_consecutive", 0)
@@ -2006,7 +2042,9 @@ class Game:
                             account_ids.add(player["steam"])
                     if account_ids:
                         client.current_match = DotaMatch(
-                            account_ids=account_ids, gamers=gamers, channel=self.channel
+                            account_ids=account_ids,
+                            gamers=gamers,
+                            channel=self.channel,
                         )
             else:
                 print_debug("Starting check")
@@ -2019,10 +2057,12 @@ class Game:
             print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
             no_gamers_consecutive = update_value(
-                increment, "no_gamers_consecutive", default=0
+                increment,
+                "no_gamers_consecutive",
+                default=0,
             )
             await self.channel.send(
-                f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row)."
+                f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row).",
             )
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
@@ -2325,7 +2365,9 @@ def process_at(args: list[str]) -> datetime.datetime | None:
         else:
             settings = None
         attempt_date = dateparser.parse(
-            date_string, languages=["en"], settings=settings
+            date_string,
+            languages=["en"],
+            settings=settings,
         )
         # go to next arg
         end += 1
@@ -2384,7 +2426,7 @@ async def consume_args(
         # sometimes users accidentally try to control a game when it doesn't exist
         if control in CURRENT_GAME_ARGS:
             await channel.send(
-                f"Cannot control a {KEYWORD} when there is none currently active."
+                f"Cannot control a {KEYWORD} when there is none currently active.",
             )
             return None
         # future date handling
@@ -2392,7 +2434,7 @@ async def consume_args(
             if control == "at":
                 if not args:
                     await channel.send(
-                        f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm"
+                        f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
                     )
                     return None
                 confirmed_date = process_at(args)
@@ -2402,7 +2444,7 @@ async def consume_args(
             if control == "in":
                 if not args:
                     await channel.send(
-                        f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes"
+                        f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes",
                     )
                     return None
                 confirmed_date = process_in(args)
@@ -2412,7 +2454,7 @@ async def consume_args(
         if control == "on":
             if not args:
                 await channel.send(
-                    f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}"
+                    f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}",
                 )
                 return None
             game = args.pop(0).lower()
@@ -2423,7 +2465,7 @@ async def consume_args(
     if control == "register":
         if not args:
             await channel.send(
-                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567"
+                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567",
             )
             return None
         id_arg = args.pop(0)
@@ -2471,7 +2513,8 @@ async def consume_args(
             await channel.send("Steam ID not found.")
             return None
         client.players_table.upsert(
-            {"id": gamer.id, "steam": steam_id.as_32}, Player.id == gamer.id
+            {"id": gamer.id, "steam": steam_id.as_32},
+            Player.id == gamer.id,
         )
         await channel.send("Steam ID linked. Matches will now be listed.")
         return None
@@ -2481,7 +2524,7 @@ async def consume_args(
             return None
         if not args:
             await channel.send(
-                f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789"
+                f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789",
             )
             return None
         option_mode = args.pop(0).lower()
@@ -2502,14 +2545,14 @@ async def consume_args(
                 await channel.send(f"{option}=null")
         else:
             await channel.send(
-                f"{option}={get_value(option, table=client.settings_table)}"
+                f"{option}={get_value(option, table=client.settings_table)}",
             )
         return None
     # if buckets
     if control == "if":
         if not args:
             await channel.send(
-                f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3"
+                f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3",
             )
             return None
         options.bucket = get_int(args.pop(0), BUCKET_MIN)
@@ -2534,7 +2577,7 @@ async def consume_args(
                     options.future = end_datetime
                     return options
         await channel.send(
-            f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours"
+            f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours",
         )
         return None
 
@@ -2569,7 +2612,7 @@ async def consume_args(
     # if we didn't find the control, it's an invalid command
     arguments = KEYWORD + " " + control + " " + " ".join(args)
     await channel.send(
-        f'Unrecognized input "{arguments}", please check the usage of the command.'
+        f'Unrecognized input "{arguments}", please check the usage of the command.',
     )
     return None
 
