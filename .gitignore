@@ -4,3 +4,4 @@
 /*.bin
 /cm_servers.json
 /responses_cache
+/.ruff_cache
