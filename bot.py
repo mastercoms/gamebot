@@ -2334,7 +2334,7 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     new_start = 0
     last = len(args)
     confirmed_date = None
-    the_timezone = get_value(str(gamer.id), default=None, table=client.tz_table)
+    the_timezone = get_value(str(gamer.id), default=None, table=client.timezone_table)
     if the_timezone is None:
         the_timezone = LOCAL_TZINFO
     else:
