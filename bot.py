@@ -428,14 +428,7 @@ class GameClient(discord.ext.commands.Bot):
 
         self.guild: discord.Guild | None = None
 
-        self.db = TinyDB(
-            Path("./db.json"), access_mode="r+", storage=BetterJSONStorage
-        )
-        self.db_new = TinyDB(Path("./db_new.json"))
-        for table in self.db.tables():
-            new_table = self.db_new.table(table)
-            for row in self.db.table(table).all():
-                new_table.insert(row)
+        self.db = TinyDB(Path("./db.json"))
         self.backup_table = self.db.table("backup")
         self.players_table = self.db.table("players")
         self.settings_table = self.db.table("settings")
