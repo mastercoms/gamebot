@@ -2835,7 +2835,7 @@ def start_bot(*, debug: bool, no_2fa: bool) -> None:
     asyncio.run(main(debug, no_2fa))
 
 
-PROFILING = True
+PROFILING = False
 
 if __name__ == "__main__":
     # TODO: arg parse
