@@ -21,8 +21,10 @@ import re
 import socket
 import string
 from copy import deepcopy
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, available_timezones
 
 import aiohttp
 import arrow
@@ -31,15 +33,14 @@ import dateparser
 import discord
 import httpx
 import orjson
-import pytz
 from BetterJSONStorage import BetterJSONStorage
 from discord import AllowedMentions, Intents
 from discord.ext.commands import MemberNotFound
 from dota2.client import Dota2Client
 from dota2.proto_enums import EDOTAGCMsg
 from httpx_auth import QueryApiKey
+from icu import TimeZone
 from numpy import interp
-from pytz import timezone
 from steam.client import SteamClient
 from steam.enums.common import EFriendRelationship
 from steam.steamid import SteamID, from_invite_code, make_steam64
@@ -533,7 +534,6 @@ class GameClient(discord.ext.commands.Bot):
             not save
             or self.current_game
             or self.current_match
-            or not save.get("active")
         ):
             return
         try:
@@ -573,7 +573,6 @@ class GameClient(discord.ext.commands.Bot):
             not save
             or self.current_game
             or self.current_match
-            or not save.get("active")
         ):
             return
         try:
@@ -894,7 +893,7 @@ def update_value(
     return new
 
 
-TIMESTAMP_TIMEZONE = pytz.utc
+TIMESTAMP_TIMEZONE = datetime.timezone.utc
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
 TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
 
@@ -926,6 +925,15 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
     """
     delta = datetime.timedelta(seconds=timestamp)
     return EPOCH + delta
+
+
+@cache
+def get_timezones():
+    return {x.lower() for x in available_timezones()}
+
+@cache
+def get_timezone_list_str():
+    return ", ".join(sorted(list(get_timezones())))
 
 
 BUCKET_MIN: int = 2
@@ -1310,7 +1318,6 @@ class DotaMatch(Match):
             "timestamp": self.timestamp,
             "polls": self.polls,
             "channel": self.channel.id,
-            "active": True,
         }
         set_value("match", data, table=client.backup_table)
 
@@ -1737,7 +1744,7 @@ class DotaMatch(Match):
             self.start_check()
         else:
             client.current_match = None
-            set_value("match", {"active": False}, table=client.backup_table)
+            del_value("match", table=client.backup_table)
             print_debug("Current match ended")
 
 
@@ -1825,13 +1832,12 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
-            "active": True,
         }
         set_value("saved", data, table=client.backup_table)
 
     def clear_backup(self):
         print_debug("Deleting backup table")
-        set_value("saved", {"active": False}, table=client.backup_table)
+        del_value("saved", table=client.backup_table)
 
     def reset(self):
         """
@@ -2336,13 +2342,14 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     confirmed_date = None
     the_timezone = get_value(str(gamer.id), default=None, table=client.timezone_table)
     if the_timezone:
-        the_timezone = timezone(the_timezone)
+        the_timezone = ZoneInfo(the_timezone)
     if not the_timezone:
         the_timezone = LOCAL_TZINFO
     local_now = client.now.astimezone(the_timezone)
     # go through until we get a date
     while True:
-        word = args[end].lower()
+        arg = args[end]
+        word = arg.lower()
         # to is a separator
         if word == "to":
             break
@@ -2400,10 +2407,11 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
                         word = just_time + ":00"
                     else:
                         word = just_time + ":00" + word[-2:]
-        elif word in pytz.all_timezones_set:
+        elif arg in get_timezones():
             is_tz_str = True
+            word = arg
         if is_tz_str:
-            new_timezone = timezone(word)
+            new_timezone = ZoneInfo(word)
             if new_timezone != the_timezone:
                 new_now = client.now.astimezone(the_timezone)
                 new_timezone_am = new_now.hour < 12
@@ -2414,12 +2422,12 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
                     else:
                         date_string.replace("am", "pm")
                 local_now = new_now
-                the_timezone = timezone(word)
+                the_timezone = new_timezone
         else:
             date_string += " " + word if date_string else word
         if the_timezone != TIMESTAMP_TIMEZONE:
             settings = {
-                "TIMEZONE": the_timezone.zone,
+                "TIMEZONE": the_timezone.tzname(local_now),
                 "TO_TIMEZONE": "UTC",
             }
             # if UTC time is in the next day, we need to act like we're getting a time in the past
@@ -2606,15 +2614,21 @@ async def consume_args(
     if control == "timezone":
         if args:
             my_tz = args.pop(0)
-            if my_tz in pytz.all_timezones_set:
-                my_tz = timezone(my_tz)
-                if my_tz:
-                    my_tz = my_tz.zone
-                    set_value(str(gamer.id), my_tz, table=client.timezone_table)
-                    await channel.send(f"Timezone set to {my_tz}.")
-                    return None
+            if my_tz.lower() == "reset":
+                del_value(str(gamer.id), table=client.timezone_table)
+                await channel.send("Timezone reset.")
+                return None
+            if my_tz in get_timezones():
+                set_value(str(gamer.id), my_tz, table=client.timezone_table)
+                icu_tz = TimeZone.createTimeZone(my_tz)
+                tz_name = icu_tz.getDisplayName(False, TimeZone.LONG)
+                await channel.send(f"Timezone set to {my_tz} ({tz_name}).")
+                return None
+            else:
+                await channel.send(f"Timezone not found. Please use an Olson/IANA timezone. Available timezones: `{get_timezone_list_str()}`")
+                return None
         await channel.send(
-            f"{KEYWORD} timezone <timezone>\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
+            f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
         )
         return None
     if control == "option":
@@ -2801,7 +2815,7 @@ with open("settings.json", "rb") as f:
     config = orjson.loads(f.read())
 
     LOCAL_TIMEZONE = config.get("local_timezone", "US/Eastern")
-    LOCAL_TZINFO = timezone(LOCAL_TIMEZONE)
+    LOCAL_TZINFO = ZoneInfo(LOCAL_TIMEZONE)
 
     KEYWORD = config.get("keyword", "game")
     KEYWORD_SUBJECT_SUFFIX = "rs" if KEYWORD.endswith("e") else "ers"

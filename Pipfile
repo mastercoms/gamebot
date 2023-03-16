@@ -34,6 +34,8 @@ black = "*"
 mypy = "*"
 isort = "*"
 cffi = "*"
+tzdata = "*"
+pyicu = "*"
 
 [requires]
 python_version = "3.11"
