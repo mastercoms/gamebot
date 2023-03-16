@@ -1754,7 +1754,6 @@
                 "sha256:fe5f866eddd8b96e9fcba978f8e503c909b19ea7efda11e52e39494bad3a7bfa"
             ],
             "index": "pypi",
-            "markers": "python_version >= '3.6'",
             "version": "==2022.7"
         },
         "tzlocal": {
