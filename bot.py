@@ -1694,9 +1694,9 @@ class DotaMatch(Match):
                 adv_map = {
                     "xp_per_min": 0,
                     "net_worth": 0,
-                    "scaled_hero_damage": 0,
+                    "hero_damage": 0,
                     "tower_damage": 0,
-                    "scaled_hero_healing": 0,
+                    "hero_healing": 0,
                     "last_hits": 0,
                     "denies": 0,
                 }
