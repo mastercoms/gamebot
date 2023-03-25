@@ -1284,15 +1284,17 @@ class DotaMatch(Match):
     ):
         self.serialize = serialize
         self.account_ids = account_ids
-        friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
+        raw_friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
         friend_ids = [
             friend_id.account_id
-            for friend_id in friend_ids
+            for friend_id in raw_friend_ids
             if friend_id
             and friend_id in client.steamclient.steam.friends
             and client.steamclient.steam.friends[friend_id].relationship
             == EFriendRelationship.Friend
         ]
+        if not friend_ids:
+            friend_ids = raw_friend_ids
         self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
         self.party_size = len(account_ids)
@@ -2032,7 +2034,7 @@ class Game:
             await asyncio.sleep(self.get_delta_seconds())
         await self.finish()
 
-    async def finish(self):
+    async def finish_inner(self):
         """
         Either finishes the game check, or starts one if it is scheduled.
         """
@@ -2086,6 +2088,12 @@ class Game:
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
+
+    async def finish(self):
+        try:
+            await self.finish_inner()
+        except Exception as e:
+            print("Failed to finish match", repr(e))
         client.current_game = None
         self.clear_backup()
 
