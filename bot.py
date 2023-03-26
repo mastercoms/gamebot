@@ -2034,7 +2034,7 @@ class Game:
             await asyncio.sleep(self.get_delta_seconds())
         await self.finish()
 
-    async def finish_inner(self):
+    async def finish_inner(self) -> bool:
         """
         Either finishes the game check, or starts one if it is scheduled.
         """
@@ -2071,7 +2071,7 @@ class Game:
                 client.now = self.future  # this is the time we should have landed on
                 self.reset()
                 create_task(self.start(client.now + self.check_delta, mention=mention))
-                return
+                return False
         else:
             print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
@@ -2088,14 +2088,18 @@ class Game:
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
+        return True
 
     async def finish(self):
+        should_end = True
         try:
-            await self.finish_inner()
+            should_end = await self.finish_inner()
         except Exception as e:
             print("Failed to finish match", repr(e))
-        client.current_game = None
-        self.clear_backup()
+        finally:
+            if should_end:
+                client.current_game = None
+                self.clear_backup()
 
     def cancel_task(self, reason: str = "Cancelled"):
         """
