@@ -1375,7 +1375,7 @@ class DotaMatch(Match):
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
-    def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
+    async def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
         if not client.steamapi:
             return
 
@@ -1387,7 +1387,11 @@ class DotaMatch(Match):
 
         print_debug(f"Querying realtime match stats for {self.account_id}...")
 
+        handled = 0
+
         def handle_resp(message):
+            if handled != 0:
+                return
             server_steamid = message.server_steamid if message else 0
             live_result = message.watch_live_result if message else 1
             print_debug(f"Got spectate response! {live_result} {server_steamid}")
@@ -1410,6 +1414,7 @@ class DotaMatch(Match):
                             create_task(channel.send("Match not started yet."))
                             return
                         wait_backoff(tries)
+                handled = 1
                 match = resp["match"]
                 teams = resp.get("teams")
                 team_id = 0
@@ -1609,6 +1614,11 @@ class DotaMatch(Match):
                 )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
+        await asyncio.sleep(10.0)
+        if handled == 0:
+            handled = 2
+            await channel.send("No live match found.")
+
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
@@ -2750,6 +2760,9 @@ async def consume_args(
         return None
 
     if control == "status":
+        if client.steamapi:
+            await channel.send("Steam API is not configured.")
+            return None
         match = client.current_match
         if args:
             match = None
@@ -2759,22 +2772,25 @@ async def consume_args(
             except MemberNotFound as e:
                 await channel.send(str(e))
                 return None
-            if member:
-                player = client.players_table.get(Player.id == member.id)
-                if player:
-                    account_id = player["steam"]
-                    match = DotaMatch(
-                        {account_id},
-                        {member},
-                        channel,
-                        should_check=False,
-                        serialize=False,
-                    )
-        if match and client.steamapi:
-            async with channel.typing():
-                match.query_realtime(channel, gamer.id)
-        else:
-            await channel.send("No live match found.")
+            player = client.players_table.get(Player.id == member.id)
+            if player:
+                account_id = player["steam"]
+                match = DotaMatch(
+                    {account_id},
+                    {member},
+                    channel,
+                    should_check=False,
+                    serialize=False,
+                )
+            if not match:
+                await channel.send("No live match found for {member.display_name}.")
+                return None
+        elif not match:
+            await channel.send("There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name")
+            return None
+        await channel.send("Checking for live match...")
+        async with channel.typing():
+            await match.query_realtime(channel, gamer.id)
         return None
 
     # if we didn't find the control, it's an invalid command
