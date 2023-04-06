@@ -2717,7 +2717,7 @@ async def consume_args(
                     options.future = end_datetime
                     return options
         await channel.send(
-            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours",
+            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to 2 hours\n**Example:** {KEYWORD} mark 3pm to 6pm",
         )
         return None
 
