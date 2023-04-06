@@ -947,8 +947,6 @@ def get_timezone_list_str() -> str:
         elif region != last_region:
             list_str = list_str[:-2] + "\n"
             last_region = region
-            if len(split) > 1:
-                list_str += "\n"
         list_str += f"{timezone}, "
     return list_str[:-2]
 
