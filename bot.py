@@ -924,7 +924,9 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 @cache
 def get_timezones() -> set[str]:
-    return available_timezones()
+    timezones = available_timezones()
+    timezones.remove("localtime")
+    return timezones
 
 
 @cache
@@ -939,11 +941,14 @@ def get_timezone_list_str() -> str:
     last_region = None
     for timezone in timezones:
         region = timezone.split("/")[0]
-        if region != last_region:
-            list_str = list_str[:-2] + "\n"
+        if last_region == None:
             last_region = region
+        elif region != last_region:
+            list_str = list_str[:-2] + "\n"
+            if len(region) > 1:
+                list_str += "\n"
         list_str += f"{timezone}, "
-    return list_str
+    return list_str[:-2]
 
 
 @cache
