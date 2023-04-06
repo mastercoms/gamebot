@@ -14,6 +14,7 @@ import asyncio
 import dataclasses
 import datetime
 import logging
+import io
 import math
 import os
 import random
@@ -922,12 +923,16 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 
 @cache
-def get_timezones():
+def get_timezones() -> set[str]:
     return {x.lower() for x in available_timezones()}
 
 @cache
-def get_timezone_list_str():
-    return ", ".join(sorted(list(get_timezones())))
+def get_timezone_list_str() -> str:
+    return "\n".join(sorted(list(get_timezones())))
+
+@cache
+def get_timezone_list_bytes() -> bytes:
+    return get_timezone_list_str().encode("utf-8")
 
 
 BUCKET_MIN: int = 2
@@ -2644,7 +2649,9 @@ async def consume_args(
                 await channel.send(f"Timezone set to {my_tz} ({tz_name}).")
                 return None
             else:
-                await channel.send(f"Timezone not found. Please use an Olson/IANA timezone. Available timezones: `{get_timezone_list_str()}`")
+                b_timezones = io.BytesIO(get_timezone_list_bytes())
+                timezone_list = discord.File(b_timezones, "timezones.txt")
+                await channel.send("Timezone not found. Please use an Olson/IANA timezone. Available timezones are attached.", file=timezone_list)
                 return None
         await channel.send(
             f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
