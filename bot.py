@@ -924,11 +924,27 @@ def generate_datetime(timestamp: int) -> datetime.datetime:
 
 @cache
 def get_timezones() -> set[str]:
-    return {x.lower() for x in available_timezones()}
+    return available_timezones()
+
+
+@cache
+def get_timezones_lower() -> set[str]:
+    return {x.lower() for x in get_timezones()}
+
 
 @cache
 def get_timezone_list_str() -> str:
-    return "\n".join(sorted(list(get_timezones())))
+    list_str = ""
+    timezones = sorted(list(get_timezones()))
+    last_region = None
+    for timezone in timezones:
+        region = timezone.split("/")[0]
+        if region != last_region:
+            list_str = list_str[:-2] + "\n"
+            last_region = region
+        list_str += f"{timezone}, "
+    return list_str
+
 
 @cache
 def get_timezone_list_bytes() -> bytes:
@@ -2420,7 +2436,7 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
                         word = just_time + ":00"
                     else:
                         word = just_time + ":00" + word[-2:]
-        elif arg in get_timezones():
+        elif arg in get_timezones_lower():
             is_tz_str = True
             word = arg
         if is_tz_str:
@@ -2642,7 +2658,7 @@ async def consume_args(
                 del_value(str(gamer.id), table=client.timezone_table)
                 await channel.send("Timezone reset.")
                 return None
-            if my_tz in get_timezones():
+            if my_tz in get_timezones_lower():
                 set_value(str(gamer.id), my_tz, table=client.timezone_table)
                 icu_tz = TimeZone.createTimeZone(my_tz)
                 tz_name = icu_tz.getDisplayName(False, TimeZone.LONG)
