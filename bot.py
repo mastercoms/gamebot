@@ -769,13 +769,7 @@ class GameClient(discord.ext.commands.Bot):
 
                     # it's a mark command
                     if options.remove_mark:
-                        if self.current_marks[options.game].pop(gamer, None):
-
-                            def clean_mark(old):
-                                old[options.game].pop(str(gamer.id), None)
-                                return old
-
-                            update_value(clean_mark, "marks", table=client.backup_table)
+                        remove_mark(options.game, gamer)
                         return
                     if options.start:
                         self.current_marks[options.game][gamer] = (
@@ -1874,6 +1868,8 @@ class Game:
                 start, end, min_bucket = params
                 if start <= self.future <= end:
                     await self.add_gamer(gamer, min_bucket)
+                elif end < client.now:
+                    remove_mark(self.game_name, gamer)
 
     def update_future(self, future: datetime.datetime):
         """
@@ -2483,17 +2479,28 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
         confirmed_date += NEXT_PERIOD
     return confirmed_date
 
+TIME_CONTROLS = {"in", "at"}
 
 def process_time_control(control: str, args: list[str], gamer: discord.Member) -> datetime.datetime | None:
     if control == "at":
         return process_at(args, gamer)
     if control == "in":
         return process_in(args)
-    return None
+    args.insert(0, control)
+    return process_at(args, gamer)
 
 
 CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
 START_GAME_ARGS = {"at", "in", "on"}
+
+
+def remove_mark(game: str, gamer: discord.Member):
+    if client.current_marks[game].pop(gamer, None):
+        def clean_mark(old):
+            old[game].pop(str(gamer.id), None)
+            return old
+
+        update_value(clean_mark, "marks", table=client.backup_table)
 
 
 async def consume_args(
@@ -2689,12 +2696,20 @@ async def consume_args(
             if time_control == "rm" or time_control == "remove":
                 options.remove_mark = True
                 return options
+            start_time_control = time_control
+            if start_time_control not in TIME_CONTROLS:
+                start_time_control = "at"
             start_datetime = process_time_control(time_control, args, gamer)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
                 if sep == "to" and args:
-                    time_control = args.pop(0).lower()
+                    new_arg = args[0].lower()
+                    if new_arg in TIME_CONTROLS:
+                        time_control = new_arg
+                        args.pop(0)
+                    else:
+                        time_control = start_time_control
                     if args:
                         end_datetime = process_time_control(time_control, args, gamer)
                 if end_datetime:
@@ -2702,7 +2717,7 @@ async def consume_args(
                     options.future = end_datetime
                     return options
         await channel.send(
-            f"{KEYWORD} mark <in/at> <time> to <in/at> <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours",
+            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to in 2 hours",
         )
         return None
 
