@@ -940,13 +940,14 @@ def get_timezone_list_str() -> str:
     timezones = sorted(list(get_timezones()))
     last_region = None
     for timezone in timezones:
-        region = timezone.split("/")[0]
+        split = timezone.split("/")
+        region = split[0]
         if last_region == None:
             last_region = region
         elif region != last_region:
             list_str = list_str[:-2] + "\n"
             last_region = region
-            if len(region) > 1:
+            if len(split) > 1:
                 list_str += "\n"
         list_str += f"{timezone}, "
     return list_str[:-2]
