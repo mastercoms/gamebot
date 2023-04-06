@@ -562,6 +562,8 @@ class GameClient(discord.ext.commands.Bot):
             restored_game.was_scheduled = save["was_scheduled"]
             restored_game.base_mention = save["base_mention"]
             restored_game.check_delta = datetime.timedelta(seconds=save["check_delta"])
+            if save["scheduled_event"]:
+                restored_game.scheduled_event = self.guild.get_scheduled_event(save["scheduled_event"])
             self.current_game = restored_game
             self.current_game.start_countdown()
         except Exception as e:
@@ -1781,8 +1783,8 @@ class DotaMatch(Match):
 
 
 def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
-    game_min = GAME_DATA[game_name].get("min", BUCKET_MIN)
-    game_max = GAME_DATA[game_name].get("max", game_min)
+    game_min = get_game_data(game_name, "min", BUCKET_MIN)
+    game_max = get_game_data(game_name, "max", game_min)
 
     # out of bounds buckets
     min_bucket = max(game_min, min(min_bucket, game_max))
@@ -1817,6 +1819,7 @@ class Game:
     was_scheduled: bool | None
     base_mention: str | None
     check_delta: datetime.timedelta | None
+    scheduled_event: discord.ScheduledEvent | None
 
     def __init__(
         self,
@@ -1842,6 +1845,8 @@ class Game:
 
         self.check_delta = MIN_CHECK_DELTA
 
+        self.scheduled_event = None
+
     def save(self):
         """
         Saves the Game to disk, so that it may be resumed in case of a crash/update/restart.
@@ -1864,6 +1869,7 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
+            "scheduled_event": self.scheduled_event.id if self.scheduled_event else None,
         }
         set_value("saved", data, table=client.backup_table)
 
@@ -1878,8 +1884,9 @@ class Game:
         print_debug("Resetted game")
         self.group_buckets = {}
 
-        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
-        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        game_min = get_game_data(self.game_name, "min", BUCKET_MIN)
+        game_max = get_game_data(self.game_name, "max", game_min)
+
         bucket_range_max = game_max + 1
         for bucket in range(game_min, bucket_range_max):
             self.group_buckets[bucket] = set()
@@ -1934,7 +1941,7 @@ class Game:
         print_debug("Initialized game")
         if self.base_mention is None:
             self.base_mention = (
-                f"<@&{GAME_DATA[self.game_name]['role']}>"
+                f"<@&{get_game_data(self.game_name, 'role')}>"
                 if mention is None
                 else mention
             )
@@ -1944,6 +1951,15 @@ class Game:
             msg = f"{self.base_mention} {name} requested a {KEYWORD_TITLE} Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, "t")
+            guild = self.channel.guild
+            self.scheduled_event = guild.create_scheduled_event(
+                name=KEYWORD_TITLE,
+                start_time=self.future,
+                channel=guild.get_channel(get_game_data(self.game_name, "voice")),
+                privacy_level=discord.PrivacyLevel.guild_only,
+                entity_type=discord.EntityType.voice,
+                reason=f"Starting {KEYWORD} for {name}",
+            )
             msg = f"{self.base_mention} {name} scheduled a {KEYWORD} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
@@ -1990,6 +2006,15 @@ class Game:
             else:
                 return
 
+        # if this is checking, then check for max before we add
+        if self.is_checking:
+            overfill = get_game_data(self.game_name, "overfill", 0)
+            cap = max_bucket + overfill
+            size = len(self.gamer_buckets)
+            if size >= cap:
+                await self.channel.send("{KEYWORD} is full. You cannot join.")
+                return
+
         # add them from that bucket and beyond
         self.gamer_buckets[gamer] = min_bucket
         for bucket in range(min_bucket, bucket_range_max):
@@ -1998,9 +2023,12 @@ class Game:
         if self.has_initial:
             name = gamer.display_name
             size = len(self.gamer_buckets)
-            size = f"**({size}/5)**"
+            size = f"**({size}/{max_bucket})**"
             with_str = get_bucket_str(min_bucket)
             if self.is_checking:
+                # we're adding a gamer to overfill
+                if size > max_bucket:
+                    with_str += f" (overfill)"
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < MIN_CHECK_COUNTDOWN:
@@ -2027,8 +2055,8 @@ class Game:
         # pop off the gamer lookup
         min_bucket = self.gamer_buckets.pop(gamer)
 
-        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
-        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        game_min = get_game_data(self.game_name, "min", BUCKET_MIN)
+        game_max = get_game_data(self.game_name, "max", game_min)
         bucket_range_max = game_max + 1
 
         # remove from all groups
@@ -2072,15 +2100,18 @@ class Game:
         """
         gamers = self.get_gamers()
         num_gamers = len(gamers)
-        print_debug("Finishing", gamers, GAME_DATA[self.game_name])
-        if num_gamers >= GAME_DATA[self.game_name].get("min", BUCKET_MIN):
+        print_debug("Finishing", gamers, self.game_name)
+        game_min = get_game_data(self.game_name, "min", BUCKET_MIN)
+        has_enough = num_gamers >= game_min
+        if has_enough or not self.is_checking:
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
                 print_debug("Finishing check")
                 # finish the game
+                max_gamers = get_game_data(self.game_name, "max", game_min)
                 await self.channel.send(
-                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/5** players ready to {KEYWORD}.",
+                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/{max_gamers}** players ready to {KEYWORD}.",
                 )
                 # we had a game
                 set_value("no_gamers_consecutive", 0)
@@ -2098,6 +2129,9 @@ class Game:
                             channel=self.channel,
                         )
             else:
+                if not has_enough:
+                    mention = self.base_mention
+                    mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
                 print_debug("Starting check")
                 # start the game up again
                 client.now = self.future  # this is the time we should have landed on
@@ -2161,6 +2195,8 @@ class Game:
         if self.is_checking:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
+        if self.scheduled_event:
+            self.scheduled_event.cancel("Cancelling {KEYWORD}")
         client.current_game = None
         self.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
@@ -2182,8 +2218,8 @@ class Game:
         """
         bucket = set()
 
-        game_min = GAME_DATA[self.game_name].get("min", BUCKET_MIN)
-        game_max = GAME_DATA[self.game_name].get("max", game_min)
+        game_min = get_game_data(self.game_name, "min", BUCKET_MIN)
+        game_max = get_game_data(self.game_name, "max", game_min)
         bucket_range_max = game_max + 1
 
         # count down from the biggest bucket, so we can stop at the biggest that satisfies
@@ -2363,10 +2399,6 @@ def process_in(args: list[str]) -> datetime.datetime | None:
     # consume our peeked inputs to the date
     del args[:new_start]
     return confirmed_date
-
-
-def mapreduce_at(args: list[list[str]]):
-    pass
 
 
 MONTHS = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'November', 'december'}
@@ -2685,7 +2717,7 @@ async def consume_args(
                 await channel.send("Timezone not found. Please use an Olson/IANA timezone. Available timezones are attached.", file=timezone_list)
                 return None
         await channel.send(
-            f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `dank at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
+            f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `{KEYWORD} at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
         )
         return None
     if control == "option":
@@ -2806,6 +2838,16 @@ async def consume_args(
 FUZZ_THRESHOLD = 75
 
 
+def get_game_data(game: str, data: str, default: Any = None) -> Any:
+    """
+    Gets the game data from settings
+    """
+    val = GAME_DATA[game].get(data, default)
+    if val is None:
+        raise ValueError(f"Game data {data} not found for {game}.")
+    return val
+
+
 def is_game_command(content: str) -> bool:
     """
     Checks if the message represents a game "command"
@@ -2833,6 +2875,7 @@ async def main(debug, no_2fa):
     intents = Intents.none()
     intents.guild_messages = True
     intents.guilds = True
+    intents.guild_scheduled_events = True
     intents.members = True
     intents.message_content = True
     intents.voice_states = True
