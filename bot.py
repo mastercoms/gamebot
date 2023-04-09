@@ -21,6 +21,7 @@ import random
 import re
 import socket
 import string
+import traceback
 from copy import deepcopy
 from functools import cache
 from pathlib import Path
@@ -273,9 +274,9 @@ class DotaAPI:
                     **params,
                 )
                 break
-            except Exception as e:
+            except Exception:
                 if tries >= 3:
-                    print("Failed to get match details:", repr(e))
+                    print("Failed to get match details:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"]["matches"]
@@ -301,9 +302,9 @@ class DotaAPI:
                 )
                 print_debug(f"get_match: {resp}")
                 break
-            except Exception as e:
+            except Exception:
                 if tries >= 10:
-                    print("Failed to get match details:", repr(e))
+                    print("Failed to get match details:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"]
@@ -318,7 +319,7 @@ class SteamWorker:
 
         @worker.on("error")
         def handle_error(result):
-            print("Logon result:", repr(result))
+            print("Logon result:", traceback.format_exc())
 
         @worker.on("connected")
         def handle_connected():
@@ -566,8 +567,8 @@ class GameClient(discord.ext.commands.Bot):
                 restored_game.scheduled_event = self.guild.get_scheduled_event(save["scheduled_event"])
             self.current_game = restored_game
             self.current_game.start_countdown()
-        except Exception as e:
-            print("Failed to restore game.", repr(e))
+        except Exception:
+            print("Failed to restore game.", traceback.format_exc())
             self.current_game = None
 
     async def restore_match(self):
@@ -593,8 +594,8 @@ class GameClient(discord.ext.commands.Bot):
             restored_match.timestamp = timestamp
             self.current_match = restored_match
             self.current_match.start_check()
-        except Exception as e:
-            print("Failed to restore match.", repr(e))
+        except Exception:
+            print("Failed to restore match.", traceback.format_exc())
             self.current_match = None
 
     def restore_marks(self):
@@ -673,10 +674,10 @@ class GameClient(discord.ext.commands.Bot):
                         msg = "Corrupted file download"
                         raise ValueError(msg)
                     break
-                except Exception as e:
+                except Exception:
                     cache_path.unlink(missing_ok=True)
                     if tries >= 3:
-                        print("Failed to download voice response:", repr(e))
+                        print("Failed to download voice response:", traceback.format_exc())
                         await get_channel(channel).send(
                             "Error: failed to download response, please try again",
                         )
@@ -767,6 +768,7 @@ class GameClient(discord.ext.commands.Bot):
                     self.now = message.created_at
 
                     # set up our arg parser
+                    print_debug(message.content)
                     args = message.content.split()[1:]
                     gamer = message.author
                     options = GameOptions()
@@ -832,8 +834,8 @@ class GameClient(discord.ext.commands.Bot):
                     message.channel,
                     message.content,
                 )
-        except Exception as e:
-            print("Unexpected error:", repr(e))
+        except Exception:
+            print("Unexpected error:", traceback.format_exc())
             await get_channel(message.channel).send("An unexpected error occurred.")
 
 
@@ -1419,9 +1421,9 @@ class DotaMatch(Match):
                         )
                         print_debug(f"GetRealtimeStats: {resp}")
                         break
-                    except Exception as e:
+                    except Exception:
                         if tries >= 10:
-                            print("Failed to get realtime stats:", repr(e))
+                            print("Failed to get realtime stats:", traceback.format_exc())
                             create_task(channel.send("Match not started yet."))
                             return
                         wait_backoff(tries)
@@ -2169,8 +2171,8 @@ class Game:
         should_end = True
         try:
             should_end = await self.finish_inner()
-        except Exception as e:
-            print("Failed to finish match", repr(e))
+        except Exception:
+            print("Failed to finish match", traceback.format_exc())
         finally:
             if should_end:
                 client.current_game = None
@@ -2861,6 +2863,9 @@ def is_game_command(content: str) -> bool:
     """
     Checks if the message represents a game "command"
     """
+    # if it is empty, fails
+    if not content:
+        return False
     # if it is the word, passes
     word = content.split(maxsplit=1)[0]
     if word.startswith(KEYWORD):
