@@ -751,10 +751,17 @@ class GameClient(discord.ext.commands.Bot):
         if not self.is_valid_message(message):
             return
 
-        message.content = message.content.replace(f"<@{client.user.id}>", "").strip()
+        original_content = message.content
+        without_mention = message.content.replace(f"<@{client.user.id}>", "")
+        has_mention = without_mention != message.content
+        message.content = without_mention.strip()
 
         try:
-            if is_game_command(message.content.lower()):
+            is_cmd = is_game_command(message.content.lower())
+            if not is_cmd and has_mention:
+                message.content = original_content.replace(f"<@{client.user.id}>", KEYWORD).strip()
+                is_cmd = is_game_command(message.content.lower())
+            if is_cmd:
                 async with self.lock:
                     # set our global now to when the message was made
                     self.now = message.created_at
