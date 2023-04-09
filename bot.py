@@ -751,6 +751,8 @@ class GameClient(discord.ext.commands.Bot):
         if not self.is_valid_message(message):
             return
 
+        message.content = message.content.replace(f"<@{client.user.id}>", "").strip()
+
         try:
             if is_game_command(message.content.lower()):
                 async with self.lock:
