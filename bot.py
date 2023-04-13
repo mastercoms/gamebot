@@ -2055,12 +2055,12 @@ class Game:
 
         if self.has_initial:
             name = gamer.display_name
-            size = len(self.gamer_buckets)
-            size = f"**({size}/{max_bucket})**"
+            size_c = len(self.gamer_buckets)
+            size = f"**({size_c}/{max_bucket})**"
             with_str = get_bucket_str(min_bucket)
             if self.is_checking:
                 # we're adding a gamer to overfill
-                if size > max_bucket:
+                if size_c > max_bucket:
                     with_str += f" (overfill)"
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
