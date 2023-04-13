@@ -1963,10 +1963,10 @@ class Game:
         else:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
-            self.scheduled_event = guild.create_scheduled_event(
+            self.scheduled_event = await guild.create_scheduled_event(
                 name=KEYWORD_TITLE,
                 start_time=self.future,
-                channel=guild.get_channel(get_game_data(self.game_name, "voice")),
+                channel=guild.get_channel(get_game_data(self.game_name, "voice", None)),
                 privacy_level=discord.PrivacyLevel.guild_only,
                 entity_type=discord.EntityType.voice,
                 reason=f"Starting {KEYWORD} for {name}",
@@ -2207,7 +2207,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         if self.scheduled_event:
-            self.scheduled_event.cancel("Cancelling {KEYWORD}")
+            await self.scheduled_event.cancel("Cancelling {KEYWORD}")
         client.current_game = None
         self.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
