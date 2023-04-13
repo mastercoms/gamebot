@@ -744,6 +744,28 @@ class GameClient(discord.ext.commands.Bot):
             return False
         return True
 
+    async def on_scheduled_event_user_add(self, event: discord.ScheduledEvent, user: discord.User):
+        if not self.current_game:
+            return
+
+        if event.id != self.current_game.scheduled_event:
+            return
+
+        member = event.guild.get_member(user.id)
+
+        await self.current_game.add_gamer(member, BUCKET_MIN)
+
+    async def on_scheduled_event_user_remove(self, event: discord.ScheduledEvent, user: discord.User):
+        if not self.current_game:
+            return
+
+        if event.id != self.current_game.scheduled_event:
+            return
+
+        member = event.guild.get_member(user.id)
+
+        await self.current_game.remove_gamer(member)
+
     async def on_message(self, message: discord.Message):
         """
         Handles new game messages.
@@ -1964,7 +1986,7 @@ class Game:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
             self.scheduled_event = await guild.create_scheduled_event(
-                name=KEYWORD_TITLE,
+                name=f"{KEYWORD_TITLE} on {self.game_name} at {short_time}",
                 start_time=self.future,
                 channel=guild.get_channel(get_game_data(self.game_name, "voice", None)),
                 privacy_level=discord.PrivacyLevel.guild_only,
