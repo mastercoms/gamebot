@@ -1985,8 +1985,9 @@ class Game:
         else:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
+            game_display = get_game_data(self.game_name, "display", self.game_name)
             self.scheduled_event = await guild.create_scheduled_event(
-                name=f"{KEYWORD_TITLE} on {self.game_name} at {short_time}",
+                name=f"{game_display} {KEYWORD_TITLE}",
                 start_time=self.future,
                 channel=guild.get_channel(get_game_data(self.game_name, "voice", None)),
                 privacy_level=discord.PrivacyLevel.guild_only,
@@ -2184,6 +2185,8 @@ class Game:
             )
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
+            if self.scheduled_event:
+                await self.scheduled_event.cancel("Cancelling {KEYWORD}")
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
