@@ -2186,7 +2186,7 @@ class Game:
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
             if self.scheduled_event:
-                await self.scheduled_event.cancel("Cancelling {KEYWORD}")
+                await self.scheduled_event.cancel(reason="Cancelling {KEYWORD}")
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
