@@ -2232,7 +2232,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         if self.scheduled_event:
-            await self.scheduled_event.cancel("Cancelling {KEYWORD}")
+            await self.scheduled_event.cancel(reason="Cancelling {KEYWORD}")
         client.current_game = None
         self.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
