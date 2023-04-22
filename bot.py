@@ -748,7 +748,7 @@ class GameClient(discord.ext.commands.Bot):
         if not self.current_game:
             return
 
-        if event.id != self.current_game.scheduled_event:
+        if event.id != self.current_game.scheduled_event.id:
             return
 
         member = event.guild.get_member(user.id)
@@ -759,7 +759,7 @@ class GameClient(discord.ext.commands.Bot):
         if not self.current_game:
             return
 
-        if event.id != self.current_game.scheduled_event:
+        if event.id != self.current_game.scheduled_event.id:
             return
 
         member = event.guild.get_member(user.id)
@@ -2086,6 +2086,8 @@ class Game:
         """
         Removes a gamer from all buckets.
         """
+        if gamer not in self.gamer_buckets:
+            return
         # pop off the gamer lookup
         min_bucket = self.gamer_buckets.pop(gamer)
 
