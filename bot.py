@@ -2046,7 +2046,7 @@ class Game:
             cap = max_bucket + overfill
             size = len(self.gamer_buckets)
             if size >= cap:
-                await self.channel.send("{KEYWORD} is full. You cannot join.")
+                await self.channel.send(f"{KEYWORD} is full. {gamer.display_name} cannot join.")
                 return
 
         # add them from that bucket and beyond
@@ -2062,7 +2062,7 @@ class Game:
             if self.is_checking:
                 # we're adding a gamer to overfill
                 if size_c > max_bucket:
-                    with_str += f" (overfill)"
+                    with_str += " (overfill)"
                 msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < MIN_CHECK_COUNTDOWN:
@@ -2100,7 +2100,7 @@ class Game:
             self.group_buckets[bucket].remove(gamer)
 
         if notify:
-            await self.channel.send(f"You left the {KEYWORD}.")
+            await self.channel.send(f"{gamer.display_name} left the {KEYWORD}.")
 
         self.save()
 
@@ -2188,7 +2188,7 @@ class Game:
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
             if self.scheduled_event:
-                await self.scheduled_event.cancel(reason="No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}")
+                await self.scheduled_event.cancel(reason=f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}")
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
@@ -2234,7 +2234,7 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         if self.scheduled_event:
-            await self.scheduled_event.cancel(reason="Cancelling {KEYWORD}")
+            await self.scheduled_event.cancel(reason=f"Cancelling {KEYWORD}")
         client.current_game = None
         self.clear_backup()
         await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
@@ -2853,10 +2853,10 @@ async def consume_args(
                     serialize=False,
                 )
             if not match:
-                await channel.send("No live match found for {member.display_name}.")
+                await channel.send(f"No live match found for {member.display_name}.")
                 return None
         elif not match:
-            await channel.send("There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name")
+            await channel.send(f"There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name")
             return None
         await channel.send("Checking for live match...")
         async with channel.typing():
