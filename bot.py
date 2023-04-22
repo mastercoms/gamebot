@@ -2188,7 +2188,7 @@ class Game:
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
             if self.scheduled_event:
-                await self.scheduled_event.cancel(reason="Cancelling {KEYWORD}")
+                await self.scheduled_event.cancel(reason="No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}")
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
@@ -2830,7 +2830,7 @@ async def consume_args(
         return None
 
     if control == "status":
-        if client.steamapi:
+        if not client.steamapi:
             await channel.send("Steam API is not configured.")
             return None
         match = client.current_match
