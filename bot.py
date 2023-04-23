@@ -748,6 +748,9 @@ class GameClient(discord.ext.commands.Bot):
         if not self.current_game:
             return
 
+        if self.current_game.is_checking:
+            return
+
         if event.id != self.current_game.scheduled_event.id:
             return
 
@@ -757,6 +760,9 @@ class GameClient(discord.ext.commands.Bot):
 
     async def on_scheduled_event_user_remove(self, event: discord.ScheduledEvent, user: discord.User):
         if not self.current_game:
+            return
+
+        if self.current_game.is_checking:
             return
 
         if event.id != self.current_game.scheduled_event.id:
