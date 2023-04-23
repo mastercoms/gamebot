@@ -772,6 +772,31 @@ class GameClient(discord.ext.commands.Bot):
 
         await self.current_game.remove_gamer(member)
 
+    async def on_scheduled_event_delete(self, event: discord.ScheduledEvent):
+        if not self.current_game:
+            return
+
+        if event.id != self.current_game.scheduled_event.id:
+            return
+
+        await self.current_game.cancel(utcnow())
+
+    async def on_scheduled_event_update(self, before: discord.ScheduledEvent, after: discord.ScheduledEvent):
+        if not self.current_game:
+            return
+
+        if self.current_game.is_checking:
+            return
+
+        if after.id != self.current_game.scheduled_event.id:
+            return
+
+        if after.status == discord.EventStatus.cancelled:
+            await self.current_game.cancel(utcnow())
+
+        if before.start_time != after.start_time:
+            await after.edit(start_time=before.start_time, reason="Game start time cannot be changed.")
+
     async def on_message(self, message: discord.Message):
         """
         Handles new game messages.
@@ -1859,6 +1884,7 @@ class Game:
     base_mention: str | None
     check_delta: datetime.timedelta | None
     scheduled_event: discord.ScheduledEvent | None
+    cancellable: bool
 
     def __init__(
         self,
@@ -1885,6 +1911,8 @@ class Game:
         self.check_delta = MIN_CHECK_DELTA
 
         self.scheduled_event = None
+
+        self.cancellable = False
 
     def save(self):
         """
@@ -1915,6 +1943,7 @@ class Game:
     def clear_backup(self):
         print_debug("Deleting backup table")
         del_value("saved", table=client.backup_table)
+        self.cancellable = False
 
     def reset(self):
         """
@@ -2116,6 +2145,7 @@ class Game:
         """
         print_debug("Starting countdown")
         self.task = create_task(self.countdown(), name="Countdown")
+        self.cancellable = True
 
     async def refresh(self, future: datetime.datetime):
         """
@@ -2149,6 +2179,7 @@ class Game:
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
+                self.cancellable = False
                 print_debug("Finishing check")
                 # finish the game
                 max_gamers = get_game_data(self.game_name, "max", game_min)
@@ -2181,6 +2212,7 @@ class Game:
                 create_task(self.start(client.now + self.check_delta, mention=mention))
                 return False
         else:
+            self.cancellable = False
             print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
             no_gamers_consecutive = update_value(
@@ -2233,6 +2265,8 @@ class Game:
         """
         Handles cancelling the game.
         """
+        if not self.cancellable:
+            return
         print_debug("Cancelling")
         self.cancel_task()
         # if checking, then we need to update things that are printed in the message
