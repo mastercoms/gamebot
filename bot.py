@@ -2181,7 +2181,8 @@ class Game:
         print_debug("Finishing", gamers, self.game_name)
         game_min = get_game_data(self.game_name, "min", BUCKET_MIN)
         has_enough = num_gamers >= game_min
-        if has_enough or not self.is_checking:
+        success = has_enough or not self.is_checking
+        if success:
             # print out the message
             mention = " ".join([gamer.mention for gamer in gamers])
             if self.is_checking:
@@ -2209,15 +2210,20 @@ class Game:
                         )
             else:
                 if not has_enough:
-                    mention = self.base_mention
-                    mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
-                print_debug("Starting check")
-                # start the game up again
-                client.now = self.future  # this is the time we should have landed on
-                self.reset()
-                create_task(self.start(client.now + self.check_delta, mention=mention))
-                return False
-        else:
+                    # only do a last call if it was a long term scheduling
+                    if self.check_delta >= MAX_CHECK_COUNTDOWN:
+                        mention = self.base_mention
+                        mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
+                    else:
+                        success = False
+                if success:
+                    print_debug("Starting check")
+                    # start the game up again
+                    client.now = self.future  # this is the time we should have landed on
+                    self.reset()
+                    create_task(self.start(client.now + self.check_delta, mention=mention))
+                    return False
+        if not success:
             self.cancellable = False
             print_debug("No gamers")
             no_gamers = update_value(increment, "no_gamers", default=0)
