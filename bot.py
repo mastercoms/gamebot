@@ -1975,12 +1975,15 @@ class Game:
         await self.add_gamer(author, bucket)
         if not self.is_checking:
             game_marks = client.current_marks[self.game_name]
+            old_marks = []
             for gamer, params in game_marks.items():
                 start, end, min_bucket = params
                 if start <= self.future <= end:
                     await self.add_gamer(gamer, min_bucket)
                 elif end < client.now:
-                    remove_mark(self.game_name, gamer)
+                    old_marks.append(gamer)
+            for gamer in old_marks:
+                remove_mark(self.game_name, gamer)
 
     def update_future(self, future: datetime.datetime):
         """
