@@ -788,6 +788,9 @@ class GameClient(discord.ext.commands.Bot):
         if self.current_game.is_checking:
             return
 
+        if not before or not after:
+            return
+
         if after.id != self.current_game.scheduled_event.id:
             return
 
