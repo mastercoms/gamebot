@@ -1030,6 +1030,7 @@ BUCKET_MIN: int = 2
 MIN_CHECK_COUNTDOWN = 2.0 * 60.0
 MAX_CHECK_COUNTDOWN = 5.0 * 60.0
 MIN_CHECK_DELTA = datetime.timedelta(seconds=MIN_CHECK_COUNTDOWN)
+MAX_CHECK_DELTA = datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN)
 
 MIN_CHECK_SCALING = 10.0 * 60.0
 MAX_CHECK_SCALING = 60.0 * 60.0
@@ -2211,7 +2212,7 @@ class Game:
             else:
                 if not has_enough:
                     # only do a last call if it was a long term scheduling
-                    if self.check_delta >= MAX_CHECK_COUNTDOWN:
+                    if self.check_delta >= MAX_CHECK_DELTA:
                         mention = self.base_mention
                         mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
                     else:
