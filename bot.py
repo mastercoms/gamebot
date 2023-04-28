@@ -840,6 +840,7 @@ class GameClient(discord.ext.commands.Bot):
                     # it's a mark command
                     if options.remove_mark:
                         remove_mark(options.game, gamer)
+                        await channel.send("Removed your availability marker.")
                         return
                     if options.start:
                         self.current_marks[options.game][gamer] = (
@@ -2526,8 +2527,8 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
             if period == "pm" or period == "am" or period == "p" or period == "a" or period == "z":
                 word += period
                 end += 1
+        is_tz_str = False
         if word[0] in NUMERIC:
-            is_tz_str = False
             # have to take leading zero off
             if word[0] == "0":
                 time_word = word[1:]
@@ -2854,7 +2855,7 @@ async def consume_args(
     if control == "mark":
         if args:
             time_control = args.pop(0).lower()
-            if time_control == "rm" or time_control == "remove":
+            if time_control == "rm" or time_control == "remove" or time_control == "clear" or time_control == "delete" or time_control == "del":
                 options.remove_mark = True
                 return options
             start_time_control = time_control
@@ -2878,7 +2879,7 @@ async def consume_args(
                     options.future = end_datetime
                     return options
         await channel.send(
-            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\n\n**Example:** {KEYWORD} mark in 1 hour to 2 hours\n**Example:** {KEYWORD} mark 3pm to 6pm",
+            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\ndank mark remove|rm\nRemoves any marked availability.\n\n**Example:** {KEYWORD} mark in 1 hour to 2 hours\n**Example:** {KEYWORD} mark 3pm to 6pm",
         )
         return None
 
