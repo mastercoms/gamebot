@@ -1463,6 +1463,7 @@ class DotaMatch(Match):
         handled = 0
 
         def handle_resp(message):
+            global handled
             if handled != 0:
                 return
             server_steamid = message.server_steamid if message else 0
