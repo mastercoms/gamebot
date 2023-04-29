@@ -1352,7 +1352,30 @@ DOTA_EXPECTED_BUILDINGS = [
 
 DOTA_CACHED_CONSTANTS = {}
 
-handled = 0
+handled = 1
+
+
+async def race_realtime(channel: discord.TextChannel, gamer: discord.Member):
+    global handled
+    await asyncio.sleep(10.0)
+    if handled == 0:
+        handled = 2
+        await channel.send(f"No live match found for {gamer.display_name}.")
+
+
+async def res_realtime(channel: discord.TextChannel, embed: discord.Embed):
+    global handled
+    if handled == 0:
+        handled = 1
+        await channel.send(embed=embed)
+
+
+async def fail_realtime(channel: discord.TextChannel, gamer: discord.Member, fmt: str):
+    global handled
+    if handled == 0:
+        handled = 2
+        await channel.send(fmt.format(gamer=gamer.display_name))
+
 
 class DotaMatch(Match):
     known_matches: set[int] = set()
@@ -1447,7 +1470,7 @@ class DotaMatch(Match):
         game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
-    async def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
+    async def query_realtime(self, channel: discord.TextChannel, gamer: discord.Member):
         global handled
         if not client.steamapi:
             return
@@ -1463,9 +1486,6 @@ class DotaMatch(Match):
         handled = 0
 
         def handle_resp(message):
-            global handled
-            if handled != 0:
-                return
             server_steamid = message.server_steamid if message else 0
             live_result = message.watch_live_result if message else 1
             print_debug(f"Got spectate response! {live_result} {server_steamid}")
@@ -1488,7 +1508,6 @@ class DotaMatch(Match):
                             create_task(channel.send("Match not started yet."))
                             return
                         wait_backoff(tries)
-                handled = 1
                 match = resp["match"]
                 teams = resp.get("teams")
                 team_id = 0
@@ -1677,21 +1696,20 @@ class DotaMatch(Match):
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
-                create_task(channel.send(embed=embed))
+                create_task(res_realtime(channel, embed))
             elif live_result == 4 or live_result == 0:
-                create_task(channel.send("No live match found."))
+                create_task(fail_realtime(channel, gamer, "No live match found for {gamer}."))
             else:
                 create_task(
-                    channel.send(
-                        f"Failed to get live match data: error code {live_result}",
+                    fail_realtime(
+                        channel,
+                        gamer,
+                        "Failed to get live match data for {{gamer}}: error code {code}".format(code=live_result),
                     ),
                 )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
-        await asyncio.sleep(10.0)
-        if handled == 0:
-            handled = 2
-            await channel.send("No live match found.")
+        race_realtime(channel, gamer)
 
 
     async def get_recent_match(self) -> dict[str, Any] | None:
@@ -2690,6 +2708,7 @@ async def consume_args(
     message: discord.Message,
     options: GameOptions,
 ) -> GameOptions | None:
+    global handled
     """
     Handles building options from command arguments by parsing args.
 
@@ -2905,7 +2924,11 @@ async def consume_args(
         if not client.steamapi:
             await channel.send("Steam API is not configured.")
             return None
+        if handled == 0:
+            await channel.send("Already querying a match, please try again later.")
+            return None
         match = client.current_match
+        member = None
         if args:
             match = None
             member_arg = args.pop(0)
@@ -2930,9 +2953,19 @@ async def consume_args(
         elif not match:
             await channel.send(f"There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name")
             return None
+        if not member:
+            # if we're in this match, just use us
+            if gamer.id in match.gamer_ids:
+                member = gamer
+            else:
+                # otherwise, find the assigned account ID's Discord
+                steam_id = match.account_id
+                player = client.players_table.get(Player.steam == steam_id)
+                if player:
+                    member = gamer.guild.get_member(player["id"])
         await channel.send("Checking for live match...")
         async with channel.typing():
-            await match.query_realtime(channel, gamer.id)
+            await match.query_realtime(channel, member)
         return None
 
     # if we didn't find the control, it's an invalid command
