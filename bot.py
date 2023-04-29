@@ -2973,9 +2973,7 @@ async def consume_args(
                 player = client.players_table.get(Player.steam == steam_id)
                 if player:
                     member = gamer.guild.get_member(player["id"])
-        await channel.send("Checking for live match...")
-        async with channel.typing():
-            await match.query_realtime(channel, member)
+        await match.query_realtime(channel, member)
         return None
 
     # if we didn't find the control, it's an invalid command
