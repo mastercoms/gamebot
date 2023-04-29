@@ -1352,6 +1352,7 @@ DOTA_EXPECTED_BUILDINGS = [
 
 DOTA_CACHED_CONSTANTS = {}
 
+handled = 0
 
 class DotaMatch(Match):
     known_matches: set[int] = set()
@@ -1447,6 +1448,7 @@ class DotaMatch(Match):
         return f"{lobby_type} {game_mode}"
 
     async def query_realtime(self, channel: discord.TextChannel, gamer_id: int):
+        global handled
         if not client.steamapi:
             return
 
