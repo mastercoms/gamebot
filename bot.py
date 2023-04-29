@@ -2417,6 +2417,10 @@ def try_steam_id(steam_id: str | int) -> SteamID | None:
         return None
 
 
+# to is a separator, rest are control words
+NON_TIME_WORDS = {"to", "if", "at", "in", "on"}
+
+
 def process_in(args: list[str]) -> datetime.datetime | None:
     # process now
     if args[0] == "now":
@@ -2431,8 +2435,7 @@ def process_in(args: list[str]) -> datetime.datetime | None:
     # go through until we get a date
     while True:
         word = args[end].lower()
-        # to is a separator
-        if word == "to":
+        if word in NON_TIME_WORDS:
             break
         # if it's a shorthand quantity, ex. 1h, 5m, separate them out to normalize for the parser
         if word[0] in NUMERIC:
@@ -2518,8 +2521,7 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     while True:
         arg = args[end]
         word = arg.lower()
-        # to is a separator
-        if word == "to":
+        if word in NON_TIME_WORDS:
             break
         # combine if space
         if last > end + 1:
@@ -2641,13 +2643,26 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
 
 TIME_CONTROLS = {"in", "at"}
 
-def process_time_control(control: str, args: list[str], gamer: discord.Member) -> datetime.datetime | None:
+
+def process_time_control(control: str, args: list[str], gamer: discord.Member) -> tuple[datetime.datetime | None, str]:
+    if control not in TIME_CONTROLS:
+        args.insert(0, control)
+    control = "at"
+    attempt = None
     if control == "at":
-        return process_at(args, gamer)
-    if control == "in":
-        return process_in(args)
-    args.insert(0, control)
-    return process_at(args, gamer)
+        attempt = process_at(args, gamer)
+    elif control == "in":
+        attempt = process_in(args)
+    if attempt:
+        return attempt, control
+    attempted = None
+    if control == "at":
+        attempt = process_in(args)
+        attempted = "in"
+    elif control == "in":
+        attempt = process_at(args, gamer)
+        attempted = "at"
+    return attempt, attempted
 
 
 CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
@@ -2709,7 +2724,7 @@ async def consume_args(
                         f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
                     )
                     return None
-                confirmed_date = process_at(args, gamer)
+                confirmed_date, _time_control = process_time_control(control, args, gamer)
                 if confirmed_date:
                     options.future = confirmed_date
                 return options
@@ -2719,7 +2734,7 @@ async def consume_args(
                         f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes",
                     )
                     return None
-                confirmed_date = process_in(args)
+                confirmed_date, _time_control = process_time_control(control, args, gamer)
                 if confirmed_date:
                     options.future = confirmed_date
                 return options
@@ -2858,10 +2873,7 @@ async def consume_args(
             if time_control == "rm" or time_control == "remove" or time_control == "clear" or time_control == "delete" or time_control == "del":
                 options.remove_mark = True
                 return options
-            start_time_control = time_control
-            if start_time_control not in TIME_CONTROLS:
-                start_time_control = "at"
-            start_datetime = process_time_control(time_control, args, gamer)
+            start_datetime, start_time_control = process_time_control(time_control, args, gamer)
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
@@ -2873,7 +2885,7 @@ async def consume_args(
                     else:
                         time_control = start_time_control
                     if args:
-                        end_datetime = process_time_control(time_control, args, gamer)
+                        end_datetime, _end_time_control = process_time_control(time_control, args, gamer)
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
