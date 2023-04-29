@@ -525,9 +525,14 @@ class GameClient(discord.ext.commands.Bot):
         """
         Closes the client.
         """
-        await self._resolver.close()
-        await self._connector.close()
-        self.steamclient.close()
+        if self._resolver:
+            await self._resolver.close()
+        if self._resolver:
+            await self._connector.close()
+        if self.steamclient:
+            self.steamclient.close()
+        if self.dotaclient:
+            self.dotaclient.exit()
         await super().close()
 
     async def restore_backup(self):
@@ -2668,7 +2673,7 @@ TIME_CONTROLS = {"in", "at"}
 def process_time_control(control: str, args: list[str], gamer: discord.Member) -> tuple[datetime.datetime | None, str]:
     if control not in TIME_CONTROLS:
         args.insert(0, control)
-        control = "at"
+        control = "in"
     attempt = None
     passed = args.copy()
     if control == "at":
