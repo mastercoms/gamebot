@@ -2441,7 +2441,7 @@ def process_in(args: list[str]) -> datetime.datetime | None:
         if word[0] in NUMERIC:
             # TODO: make this detection more generic so people can combine a shorthand with other quantities
             # if it's just a raw quanity, add a shorthand unit so it can be handled
-            if word[len(word) - 1] in NUMERIC and end + 1 >= last:
+            if word[len(word) - 1] in NUMERIC and (end + 1 >= last or args[end + 1].lower() not in NON_TIME_WORDS or args[end + 1].lower() == "and"):
                 word += "m"
             # now check if there's a shorthand unit at the end of the quantity
             if word[len(word) - 1] not in NUMERIC:
