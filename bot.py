@@ -84,6 +84,10 @@ def create_task(coro: Coroutine, *, name: str = None) -> TaskWrapper:
     return TaskWrapper(task)
 
 
+def dispatch_task(coro: Coroutine):
+    asyncio.run_coroutine_threadsafe(coro, client.loop)
+
+
 def get_channel(channel: discord.TextChannel | None) -> discord.TextChannel:
     settings_channel = get_value("channel_id", table=client.settings_table)
     if settings_channel:
@@ -703,9 +707,8 @@ class GameClient(discord.ext.commands.Bot):
             def play(path: Path):
                 voice_client.play(
                     discord.FFmpegOpusAudio(str(path)),
-                    after=lambda err: asyncio.run_coroutine_threadsafe(
-                        disconnect(),
-                        self.loop,
+                    after=lambda err: dispatch_task(
+                        disconnect()
                     ),
                 )
 
@@ -1510,7 +1513,7 @@ class DotaMatch(Match):
                     except Exception:
                         if tries >= 10:
                             print("Failed to get realtime stats:", traceback.format_exc())
-                            create_task(channel.send("Match not started yet."))
+                            dispatch_task(fail_realtime(channel, gamer, "Match for {{gamer}} not started yet."))
                             return
                         wait_backoff(tries)
                 match = resp["match"]
@@ -1701,11 +1704,11 @@ class DotaMatch(Match):
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
-                create_task(res_realtime(channel, embed))
+                dispatch_task(res_realtime(channel, embed))
             elif live_result == 4 or live_result == 0:
-                create_task(fail_realtime(channel, gamer, "No live match found for {gamer}."))
+                dispatch_task(fail_realtime(channel, gamer, "No live match found for {gamer}."))
             else:
-                create_task(
+                dispatch_task(
                     fail_realtime(
                         channel,
                         gamer,
@@ -1714,7 +1717,7 @@ class DotaMatch(Match):
                 )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
-        race_realtime(channel, gamer)
+        await race_realtime(channel, gamer)
 
 
     async def get_recent_match(self) -> dict[str, Any] | None:
