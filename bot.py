@@ -2011,6 +2011,8 @@ class Game:
             game_marks = client.current_marks[self.game_name]
             old_marks = []
             for gamer, params in game_marks.items():
+                if gamer.id == author.id:
+                    continue
                 start, end, min_bucket = params
                 if start <= self.future <= end:
                     await self.add_gamer(gamer, min_bucket)
