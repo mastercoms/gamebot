@@ -2320,6 +2320,7 @@ class Game:
         """
         if not self.cancellable:
             return
+        self.cancellable = False
         print_debug("Cancelling")
         self.cancel_task()
         # if checking, then we need to update things that are printed in the message
