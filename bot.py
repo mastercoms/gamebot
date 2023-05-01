@@ -833,10 +833,18 @@ class GameClient(discord.ext.commands.Bot):
 
                     # set up our arg parser
                     print_debug(message.content)
+
                     args = message.content.split()[1:]
+                    arg_str = " ".join(args)
                     gamer = message.author
                     options = GameOptions()
                     channel = get_channel(message.channel)
+
+                    # easter egg
+                    if not self.current_game and "but u have to wait for me to walk back from the library" in arg_str:
+                        arg_str = arg_str.replace("but u have to wait for me to walk back from the library", "")
+                        args = arg_str.split()
+                        options.future = self.now + datetime.timedelta(minutes=10)
 
                     # consume all args
                     while args:
