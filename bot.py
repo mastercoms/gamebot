@@ -2342,6 +2342,9 @@ class Game:
         # if checking, then we need to update things that are printed in the message
         if self.is_checking:
             await self.update_timestamp(now)
+        else:
+            # otherwise, we need to just update the future used for the next check
+            await self.update_future(now)
         await self.finish()
 
     def get_gamers(self) -> set[discord.Member]:
@@ -2679,6 +2682,10 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     # if we got it wrong, advance from AM -> PM (or PM -> AM)
     if confirmed_date and client.now > confirmed_date:
         confirmed_date += NEXT_PERIOD
+        # if we got it wrong again, advance from AM -> PM (or PM -> AM)
+        # this happens for "today's am" when you're currently in "today's pm" and want "tomorrow's am".
+        if confirmed_date and client.now > confirmed_date:
+            confirmed_date += NEXT_PERIOD
     return confirmed_date
 
 TIME_CONTROLS = {"in", "at"}
@@ -2688,24 +2695,43 @@ def process_time_control(control: str, args: list[str], gamer: discord.Member) -
     if control not in TIME_CONTROLS:
         args.insert(0, control)
         control = "in"
-    attempt = None
-    passed = args.copy()
+    attempt1 = None
+    saved_args = args.copy()
     if control == "at":
-        attempt = process_at(args, gamer)
+        attempt1 = process_at(args, gamer)
     elif control == "in":
-        attempt = process_in(args)
-    if attempt:
-        return attempt, control
+        attempt1 = process_in(args)
+    no_time_args_left = not args or args[0] in NON_TIME_WORDS
+    if attempt1 and no_time_args_left:
+        return attempt1, control
+    first_args = None
+    if attempt1:
+        first_args = args.copy()
     attempted = None
     args.clear()
-    args.extend(passed)
+    args.extend(saved_args)
+    attempt2 = None
     if control == "at":
-        attempt = process_in(args)
+        attempt2 = process_in(args)
         attempted = "in"
     elif control == "in":
-        attempt = process_at(args, gamer)
+        attempt2 = process_at(args, gamer)
         attempted = "at"
-    return attempt, attempted
+    # if we didn't find an attempt1, then it's auto return for attempt2
+    more_consumed = not attempt1
+    if attempt1:
+        # see if we consume more words for attempt2 (more fitting)
+        # prefer "in" if there is equal consumption
+        # "at" has to consume strictly more words to be preferred
+        first_args_left = len(first_args)
+        second_args_left = len(args)
+        if attempted == "in":
+            more_consumed = second_args_left <= first_args_left
+        elif attempted == "at":
+            more_consumed = second_args_left < first_args_left
+    if more_consumed:
+        return attempt2, attempted
+    return attempt1, control
 
 
 CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
