@@ -2019,11 +2019,10 @@ class Game:
             game_marks = client.current_marks[self.game_name]
             old_marks = []
             for gamer, params in game_marks.items():
-                if gamer.id == author.id:
-                    continue
                 start, end, min_bucket = params
                 if start <= self.future <= end:
-                    await self.add_gamer(gamer, min_bucket)
+                    if gamer.id != author.id:
+                        await self.add_gamer(gamer, min_bucket)
                 elif end < client.now:
                     old_marks.append(gamer)
             for gamer in old_marks:
@@ -2344,7 +2343,7 @@ class Game:
             await self.update_timestamp(now)
         else:
             # otherwise, we need to just update the future used for the next check
-            await self.update_future(now)
+            self.update_future(now)
         await self.finish()
 
     def get_gamers(self) -> set[discord.Member]:
