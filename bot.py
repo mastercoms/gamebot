@@ -590,16 +590,14 @@ class GameClient(discord.ext.commands.Bot):
             return
         try:
             timestamp = save["timestamp"]
-            if utcnow() - timestamp >= datetime.timedelta(
-                seconds=MATCH_MAX_POLL_LENGTH,
-            ):
+            if generate_timestamp(utcnow()) - timestamp >= MATCH_MAX_POLL_LENGTH:
                 return
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
             gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamers"]}
             channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
-            restored_match.known_matches = save["known_matches"]
+            restored_match.known_matches = set(save["known_matches"])
             restored_match.timestamp = timestamp
             self.current_match = restored_match
             self.current_match.start_check()
@@ -1411,7 +1409,7 @@ class DotaMatch(Match):
         gamers: set[discord.Member],
         channel: discord.TextChannel,
         should_check: bool = True,
-        serialize: bool = False,
+        serialize: bool = True,
     ):
         self.serialize = serialize
         self.account_ids = account_ids
@@ -1878,9 +1876,8 @@ class DotaMatch(Match):
                     await self.channel.send(EXTRA_WIN_MESSAGE)
             elif EXTRA_LOSS_MESSAGE:
                 await self.channel.send(EXTRA_LOSS_MESSAGE)
-        else:
-            self.save()
         if self.polls < MATCH_MAX_POLLS:
+            self.save()
             self.start_check()
         else:
             client.current_match = None
