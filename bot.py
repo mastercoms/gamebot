@@ -856,7 +856,14 @@ class GameClient(discord.ext.commands.Bot):
                         remove_mark(options.game, gamer)
                         await channel.send("Removed your availability marker.")
                         return
-                    if options.start:
+                    
+                    # check if it's sufficiently in the future
+                    if options.future:
+                        delta = options.future - self.now
+                        if delta < MIN_CHECK_DELTA:
+                            options.future = None
+
+                    if options.start and options.future:
                         self.current_marks[options.game][gamer] = (
                             options.start,
                             options.future,
@@ -884,11 +891,6 @@ class GameClient(discord.ext.commands.Bot):
 
                     # are we going to start a game?
                     if not self.current_game:
-                        # check if it's sufficiently in the future
-                        if options.future:
-                            delta = options.future - self.now
-                            if delta < MIN_CHECK_DELTA:
-                                options.future = None
                         # if didn't get a date, default to delta
                         if not options.future:
                             options.future = self.now + MIN_CHECK_DELTA
@@ -896,6 +898,15 @@ class GameClient(discord.ext.commands.Bot):
                         self.current_game = Game(channel, gamer, options.game)
                         await self.current_game.start(options.future)
                         await self.current_game.add_initials(gamer, options.bucket)
+                    elif options.future:
+                        # if we're already checking, we can't change the time
+                        if self.current_game.is_checking:
+                            await channel.send(f"You can't change the time of a {KEYWORD_TITLE} Check.")
+                            return
+                        # if we're not checking, we can change the time
+                        else:
+                            print_debug("Changing game time", options.future, gamer)
+                            await self.current_game.change_time(options.future)
                     else:
                         # add to game
                         await self.current_game.add_gamer(gamer, options.bucket)
@@ -2025,6 +2036,16 @@ class Game:
             for gamer in old_marks:
                 remove_mark(self.game_name, gamer)
 
+    async def change_time(self, future: datetime.datetime):
+        """
+        Changes the time the game finishes.
+        """
+        if self.is_checking:
+            return
+        self.cancel_task(reason="Changing time")
+        await self.update_timestamp(future)
+        self.start_countdown()
+
     def update_future(self, future: datetime.datetime):
         """
         Sets the time the game finishes.
@@ -2296,7 +2317,7 @@ class Game:
         """
         Directly cancels the asyncio countdown task.
         """
-        print_debug("Cancelling task")
+        print_debug("Cancelling task: ", reason)
         self.task.cancel(msg=reason)
 
     async def update_timestamp(self, new_future: datetime.datetime):
@@ -2782,28 +2803,6 @@ async def consume_args(
                 f"Cannot control a {KEYWORD} when there is none currently active.",
             )
             return None
-        # future date handling
-        if options.future is None:
-            if control == "at":
-                if not args:
-                    await channel.send(
-                        f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
-                    )
-                    return None
-                confirmed_date, _time_control = process_time_control(control, args, gamer)
-                if confirmed_date:
-                    options.future = confirmed_date
-                return options
-            if control == "in":
-                if not args:
-                    await channel.send(
-                        f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes",
-                    )
-                    return None
-                confirmed_date, _time_control = process_time_control(control, args, gamer)
-                if confirmed_date:
-                    options.future = confirmed_date
-                return options
         if control == "on":
             if not args:
                 await channel.send(
@@ -2815,6 +2814,28 @@ async def consume_args(
                 options.game = game
                 return options
 
+    # future date handling
+    if options.future is None:
+        if control == "at":
+            if not args:
+                await channel.send(
+                    f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
+                )
+                return None
+            confirmed_date, _time_control = process_time_control(control, args, gamer)
+            if confirmed_date:
+                options.future = confirmed_date
+            return options
+        if control == "in":
+            if not args:
+                await channel.send(
+                    f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes",
+                )
+                return None
+            confirmed_date, _time_control = process_time_control(control, args, gamer)
+            if confirmed_date:
+                options.future = confirmed_date
+            return options
     if control == "register":
         if not args:
             await channel.send(
