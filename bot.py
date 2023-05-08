@@ -552,7 +552,7 @@ class GameClient(discord.ext.commands.Bot):
             author = self.guild.get_member(save["author"])
             game_name = save["game_name"]
             future = datetime.datetime.fromisoformat(save["future"])
-            if utcnow() - future > datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
+            if utcnow() - future > MAX_CHECK_DELTA:
                 return
             print_debug("Resuming saved", save)
             restored_game = Game(channel, author, game_name)
@@ -614,7 +614,7 @@ class GameClient(discord.ext.commands.Bot):
             for gamer_id, params in game_marks.items():
                 end = datetime.datetime.fromisoformat(params[1])
                 diff = now - end if now > end else end - now
-                if diff >= datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN):
+                if diff <= MAX_CHECK_DELTA:
                     continue
                 self.current_marks[game][self.guild.get_member(int(gamer_id))] = (
                     datetime.datetime.fromisoformat(params[0]),
@@ -860,10 +860,15 @@ class GameClient(discord.ext.commands.Bot):
                     # check if it's sufficiently in the future
                     if options.future:
                         delta = options.future - self.now
-                        if delta < MIN_CHECK_DELTA:
+                        if options.start and delta <= MAX_CHECK_DELTA:
+                            options.future = None
+                        elif delta < MIN_CHECK_DELTA:
                             options.future = None
 
-                    if options.start and options.future:
+                    if options.start:
+                        if not options.future:
+                            await channel.send("Cannot mark availability so close to now.")
+                            return
                         self.current_marks[options.game][gamer] = (
                             options.start,
                             options.future,
@@ -2361,7 +2366,11 @@ class Game:
             await self.update_timestamp(now)
         else:
             # otherwise, we need to just update the future used for the next check
+            old_check_delta = self.check_delta
             self.update_future(now)
+            # restore old properties for the finish
+            self.check_delta = old_check_delta
+            self.is_checking = False
         await self.finish()
 
     def get_gamers(self) -> set[discord.Member]:
