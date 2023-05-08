@@ -15,13 +15,16 @@ import dataclasses
 import datetime
 import logging
 import io
+import itertools
 import math
 import os
 import random
 import re
 import socket
 import string
+import sys
 import traceback
+from collections import defaultdict
 from copy import deepcopy
 from functools import cache
 from pathlib import Path
@@ -36,6 +39,7 @@ import discord
 import httpx
 import orjson
 from BetterJSONStorage import BetterJSONStorage
+from datetimerange import DateTimeRange
 from discord import AllowedMentions, Intents
 from discord.ext.commands import MemberNotFound
 from dota2.client import Dota2Client
@@ -459,7 +463,7 @@ class GameClient(discord.ext.commands.Bot):
         self.current_game: Game | None = None
         self.current_marks: dict[
             str,
-            dict[discord.Member, tuple[datetime.datetime, datetime.datetime, int]],
+            dict[discord.Member, tuple[DateTimeRange, int]],
         ] = {}
         for game in GAMES:
             self.current_marks[game] = {}
@@ -613,12 +617,12 @@ class GameClient(discord.ext.commands.Bot):
         for game, game_marks in marks.items():
             for gamer_id, params in game_marks.items():
                 end = datetime.datetime.fromisoformat(params[1])
-                diff = now - end if now > end else end - now
-                if diff <= MAX_CHECK_DELTA:
+                if now > end:
+                    continue
+                if end - now <= MAX_CHECK_DELTA:
                     continue
                 self.current_marks[game][self.guild.get_member(int(gamer_id))] = (
-                    datetime.datetime.fromisoformat(params[0]),
-                    end,
+                    DateTimeRange(datetime.datetime.fromisoformat(params[0]), end),
                     params[2],
                 )
 
@@ -870,29 +874,69 @@ class GameClient(discord.ext.commands.Bot):
                             await channel.send("Cannot mark availability so close to now.")
                             return
                         self.current_marks[options.game][gamer] = (
-                            options.start,
-                            options.future,
+                            DateTimeRange(options.start, options.future),
                             options.bucket,
                         )
+                        game_intersections = defaultdict(list)
+                        min_game_bucket = {}
+                        max_game_bucket = {}
                         saved_marks = {}
                         for game, game_marks in self.current_marks.items():
                             saved_marks[game] = {}
                             for marker, params in game_marks.items():
-                                start, future, min_bucket = params
+                                dtrange, min_bucket = params
+                                game_intersections[game].append(dtrange)
+                                current_min_game_bucket, _min_marker = min_game_bucket.get(game, (sys.maxint, None))
+                                if min_bucket < current_min_game_bucket:
+                                    min_game_bucket[game] = (min_bucket, marker)
+                                current_max_game_bucket, _max_marker = max_game_bucket.get(game, (0, None))
+                                if min_bucket > current_max_game_bucket:
+                                    max_game_bucket[game] = (min_bucket, marker)
                                 saved_marks[game][str(marker.id)] = [
-                                    start.isoformat(),
-                                    future.isoformat(),
+                                    dtrange.start_datetime.isoformat(),
+                                    dtrange.end_datetime.isoformat(),
                                     min_bucket,
                                 ]
                         set_value("marks", saved_marks, table=client.backup_table)
-                        min_bucket, max_bucket = get_bucket_bounds(
-                            options.bucket,
-                            options.game,
-                        )
-                        with_str = get_bucket_str(min_bucket)
-                        msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
-                        await channel.send(msg)
-                        return
+
+                        starting_game = False
+
+                        # see if we can automatically start one
+                        if not self.current_game:
+                            for game, dtranges in game_intersections.items():
+                                if len(dtranges) > 1:
+                                    max_count = 2
+                                    best_intersection = None
+                                    comparisons = list(itertools.permutations(dtranges))
+                                    for comparison in comparisons:
+                                        count = 1
+                                        intersection = comparison[0]
+                                        for dtrange in comparison[1:]:
+                                            intersection = intersection.intersection(dtrange)
+                                            if not intersection:
+                                                break
+                                            count += 1
+                                        if count > max_count:
+                                            max_count = count
+                                            best_intersection = intersection
+
+                                    if best_intersection:
+                                        starting_game = True
+                                        options.game = game
+                                        options.future = best_intersection.start_datetime
+                                        min_bucket, min_marker = min_game_bucket[game]
+                                        options.bucket = min_bucket
+                                        gamer = min_marker
+
+                        if not starting_game:
+                            min_bucket, max_bucket = get_bucket_bounds(
+                                options.bucket,
+                                options.game,
+                            )
+                            with_str = get_bucket_str(min_bucket)
+                            msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
+                            await channel.send(msg)
+                            return
 
                     # are we going to start a game?
                     if not self.current_game:
@@ -2032,12 +2076,12 @@ class Game:
             game_marks = client.current_marks[self.game_name]
             old_marks = []
             for gamer, params in game_marks.items():
-                start, end, min_bucket = params
-                if start <= self.future <= end:
+                dtrange, min_bucket = params
+                if dtrange.end_datetime < client.now:
+                    old_marks.append(gamer)
+                elif self.future in dtrange:
                     if gamer.id != author.id:
                         await self.add_gamer(gamer, min_bucket)
-                elif end < client.now:
-                    old_marks.append(gamer)
             for gamer in old_marks:
                 remove_mark(self.game_name, gamer)
 
