@@ -22,7 +22,6 @@ import random
 import re
 import socket
 import string
-import sys
 import traceback
 from collections import defaultdict
 from copy import deepcopy
@@ -886,7 +885,7 @@ class GameClient(discord.ext.commands.Bot):
                             for marker, params in game_marks.items():
                                 dtrange, min_bucket = params
                                 game_intersections[game].append(dtrange)
-                                current_min_game_bucket, _min_marker = min_game_bucket.get(game, (sys.maxint, None))
+                                current_min_game_bucket, _min_marker = min_game_bucket.get(game, (math.inf, None))
                                 if min_bucket < current_min_game_bucket:
                                     min_game_bucket[game] = (min_bucket, marker)
                                 current_max_game_bucket, _max_marker = max_game_bucket.get(game, (0, None))
