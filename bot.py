@@ -903,15 +903,19 @@ class GameClient(discord.ext.commands.Bot):
                         # see if we can automatically start one
                         if not self.current_game:
                             for game, dtranges in game_intersections.items():
+                                print_debug("dtranges", game, dtranges)
                                 if len(dtranges) > 1:
-                                    max_count = 2
+                                    max_count = 1
                                     best_intersection = None
                                     comparisons = list(itertools.permutations(dtranges))
+                                    print_debug("dtrange comparisons", game, comparisons)
                                     for comparison in comparisons:
                                         count = 1
                                         intersection = comparison[0]
+                                        print_debug("dtrange intersection", game, intersection)
                                         for dtrange in comparison[1:]:
                                             intersection = intersection.intersection(dtrange)
+                                            print_debug("dtrange intersection", game, intersection)
                                             if not intersection:
                                                 break
                                             count += 1
@@ -920,6 +924,7 @@ class GameClient(discord.ext.commands.Bot):
                                             best_intersection = intersection
 
                                     if best_intersection:
+                                        print_debug("starting", game, best_intersection)
                                         starting_game = True
                                         options.game = game
                                         options.future = best_intersection.start_datetime
