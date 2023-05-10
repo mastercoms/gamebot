@@ -876,6 +876,7 @@ class GameClient(discord.ext.commands.Bot):
                             DateTimeRange(options.start, options.future),
                             options.bucket,
                         )
+                        old_marks = defaultdict(list)
                         game_intersections = defaultdict(list)
                         min_game_bucket = {}
                         max_game_bucket = {}
@@ -884,6 +885,9 @@ class GameClient(discord.ext.commands.Bot):
                             saved_marks[game] = {}
                             for marker, params in game_marks.items():
                                 dtrange, min_bucket = params
+                                if dtrange.end_datetime < self.now:
+                                    old_marks[game].append(marker)
+                                    continue
                                 game_intersections[game].append(dtrange)
                                 current_min_game_bucket, _min_marker = min_game_bucket.get(game, (math.inf, None))
                                 if min_bucket < current_min_game_bucket:
@@ -896,6 +900,9 @@ class GameClient(discord.ext.commands.Bot):
                                     dtrange.end_datetime.isoformat(),
                                     min_bucket,
                                 ]
+                        for game, game_marks in old_marks.items():
+                            for marker, params in game_marks:
+                                remove_mark(game, marker)
                         set_value("marks", saved_marks, table=client.backup_table)
 
                         starting_game = False
