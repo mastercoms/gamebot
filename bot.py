@@ -1811,12 +1811,21 @@ class DotaMatch(Match):
             DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
             party_size = 0
+            fallback_team = None
             for player in match["players"]:
                 player_account = player["account_id"]
                 if player_account in self.account_ids:
                     party_size += 1
+                    if not fallback_team:
+                        fallback_team = player["team_number"]
                 if player_account == self.account_id:
                     match["player_team"] = player["team_number"]
+            print_debug(f"account: {self.account_id}, team {match.get('player_team')}, fallback: {fallback_team}")
+            if not match.get("player_team"):
+                if fallback_team:
+                    match["player_team"] = fallback_team
+                else:
+                    match["player_team"] = 0
             party_size = party_size or 5
             print_debug(f"party_size: {party_size}")
             match["party_size"] = party_size
