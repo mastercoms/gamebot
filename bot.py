@@ -1442,7 +1442,7 @@ handled = 1
 
 async def race_realtime(channel: discord.TextChannel, gamer: discord.Member):
     global handled
-    await asyncio.sleep(10.0)
+    await asyncio.sleep(60.0)
     if handled == 0:
         handled = 2
         await channel.send(f"No live match found for {gamer.display_name}.")
