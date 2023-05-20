@@ -788,6 +788,7 @@ class GameClient(discord.ext.commands.Bot):
         if event.id != self.current_game.scheduled_event.id:
             return
 
+        self.current.game.scheduled_event = None
         await self.current_game.cancel(utcnow())
 
     async def on_scheduled_event_update(self, before: discord.ScheduledEvent, after: discord.ScheduledEvent):
