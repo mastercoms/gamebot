@@ -765,7 +765,7 @@ class GameClient(discord.ext.commands.Bot):
 
         member = event.guild.get_member(user.id)
 
-        await self.current_game.add_gamer(member, BUCKET_MIN)
+        await self.current_game.add_gamer(member, BUCKET_MIN, skip_exist=True)
 
     async def on_scheduled_event_user_remove(self, event: discord.ScheduledEvent, user: discord.User):
         if not self.current_game:
@@ -1640,10 +1640,11 @@ class DotaMatch(Match):
                             "\u200B": "\u200B",
                         }
                         for key in per_player_stats[team_id]:
-                            adv_map[key] = (
-                                per_player_stats[team_id][key]
-                                - per_player_stats[other_team][key]
-                            )
+                            diff = per_player_stats[team_id][key] - per_player_stats[other_team][key]
+                            mag = abs(diff)
+                            avg = (per_player_stats[team_id][key] + per_player_stats[other_team][key]) / 2
+                            pct = diff / avg if avg else 0
+                            adv_map[key] = f"{diff:+d} ({pct:+.1%})"
                         adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
@@ -1910,21 +1911,21 @@ class DotaMatch(Match):
 
             if match_details:
                 adv_map = {
-                    "xp_per_min": 0,
-                    "net_worth": 0,
-                    "hero_damage": 0,
-                    "tower_damage": 0,
-                    "hero_healing": 0,
-                    "last_hits": 0,
-                    "denies": 0,
+                    "xp_per_min": (0, 0),
+                    "net_worth": (0, 0),
+                    "hero_damage": (0, 0),
+                    "tower_damage": (0, 0),
+                    "hero_healing": (0, 0),
+                    "last_hits": (0, 0),
+                    "denies": (0, 0),
                 }
                 for player in match_details["players"]:
                     player_team = player["team_number"]
                     for key in adv_map:
                         if player_team == team_num:
-                            adv_map[key] += player[key]
+                            adv_map[key] += (player[key], 0)
                         else:
-                            adv_map[key] -= player[key]
+                            adv_map[key] += (0, player[key])
 
                 adv_map["xp_per_min"] *= match_details["duration"] / 60.0
                 adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
@@ -1932,8 +1933,12 @@ class DotaMatch(Match):
                 embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
                 for k, v in adv_map.items():
+                    diff = v[0] - v[1]
+                    mag = abs(diff)
+                    avg = (v[0] + v[1]) / 2
+                    pct = mag / avg if avg else 0
                     label = DOTA_ADV_LABELS[k]
-                    embed.add_field(name=label, value=v)
+                    embed.add_field(name=label, value=f"{diff:+d} ({pct:+.1%})")
 
             # rank
             basic_match = await self.get_basic_match(match_id)
@@ -2091,7 +2096,7 @@ class Game:
         self.save()
 
     async def add_initials(self, author: discord.Member, bucket: int):
-        await self.add_gamer(author, bucket)
+        await self.add_gamer(author, bucket, skip_exist=True)
         if not self.is_checking:
             game_marks = client.current_marks[self.game_name]
             old_marks = []
@@ -2101,7 +2106,7 @@ class Game:
                     old_marks.append(gamer)
                 elif self.future in dtrange:
                     if gamer.id != author.id:
-                        await self.add_gamer(gamer, min_bucket)
+                        await self.add_gamer(gamer, min_bucket, skip_exist=True)
             for gamer in old_marks:
                 remove_mark(self.game_name, gamer)
 
@@ -2193,7 +2198,7 @@ class Game:
         """
         await self.update_message(self.message.content.replace(old, new))
 
-    async def add_gamer(self, gamer: discord.Member, min_bucket: int):
+    async def add_gamer(self, gamer: discord.Member, min_bucket: int, skip_exist: bool = False):
         """
         Sets a gamer to the specified buckets.
         """
@@ -2203,6 +2208,8 @@ class Game:
         # remove them first if this is an update
         current_min_bucket = self.gamer_buckets.get(gamer)
         if current_min_bucket:
+            if skip_exist:
+                return
             if current_min_bucket != min_bucket:
                 await self.remove_gamer(gamer, notify=False)
             else:
