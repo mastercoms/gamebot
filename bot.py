@@ -842,12 +842,6 @@ class GameClient(discord.ext.commands.Bot):
                     options = GameOptions()
                     channel = get_channel(message.channel)
 
-                    # easter egg
-                    if not self.current_game and "but u have to wait for me to walk back from the library" in arg_str:
-                        arg_str = arg_str.replace("but u have to wait for me to walk back from the library", "")
-                        args = arg_str.split()
-                        options.future = self.now + datetime.timedelta(minutes=10)
-
                     # consume all args
                     while args:
                         options = await consume_args(args, gamer, message, options)
@@ -939,6 +933,13 @@ class GameClient(discord.ext.commands.Bot):
                                         min_bucket, min_marker = min_game_bucket[game]
                                         options.bucket = min_bucket
                                         gamer = min_marker
+                                        # check if it's sufficiently in the future
+                                        if options.future:
+                                            delta = options.future - self.now
+                                            if options.start and delta <= MAX_CHECK_DELTA:
+                                                options.future = None
+                                            elif delta < MIN_CHECK_DELTA:
+                                                options.future = None
 
                         if not starting_game:
                             min_bucket, max_bucket = get_bucket_bounds(
