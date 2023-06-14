@@ -911,7 +911,7 @@ class GameClient(discord.ext.commands.Bot):
                                     min_bucket,
                                 ]
                         for game, game_marks in old_marks.items():
-                            for marker, params in game_marks:
+                            for marker in game_marks:
                                 remove_mark(game, marker)
                         set_value("marks", saved_marks, table=client.backup_table)
 
