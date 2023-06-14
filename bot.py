@@ -2372,7 +2372,7 @@ class Game:
             else:
                 if not has_enough:
                     # only do a last call if it was a long term scheduling
-                    if self.check_delta > MAX_CHECK_DELTA:
+                    if self.check_delta > MAX_CHECK_DELTA and get_value("is_last_call_enabled", table=client.settings_table):
                         mention = self.base_mention
                         mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
                     else:
@@ -3043,6 +3043,8 @@ async def consume_args(
                     new_value = get_int(new_value, default=None)
                     if new_value is None:
                         new_value = tmp
+                elif "is" in option:
+                    new_value = new_value.lower() in ("true", "1", "yes", "on")
 
                 set_value(option, new_value, table=client.settings_table)
                 await channel.send(f"{option}={new_value}")
