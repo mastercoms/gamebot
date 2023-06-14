@@ -951,10 +951,8 @@ class GameClient(discord.ext.commands.Bot):
                                         # check if it's sufficiently in the future
                                         if options.future:
                                             delta = options.future - self.now
-                                            if options.start and delta <= MAX_CHECK_DELTA:
-                                                options.future = None
-                                            elif delta < MIN_CHECK_DELTA:
-                                                options.future = None
+                                            if delta <= MAX_CHECK_DELTA:
+                                                options.future = self.now + MIN_SCHEDULED_DELTA
 
                         if not starting_game:
                             min_bucket, max_bucket = get_bucket_bounds(
@@ -1134,6 +1132,7 @@ MIN_CHECK_COUNTDOWN = 2.0 * 60.0
 MAX_CHECK_COUNTDOWN = 5.0 * 60.0
 MIN_CHECK_DELTA = datetime.timedelta(seconds=MIN_CHECK_COUNTDOWN)
 MAX_CHECK_DELTA = datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN)
+MIN_SCHEDULED_DELTA = datetime.timedelta(seconds=MAX_CHECK_COUNTDOWN + 1.0)
 
 MIN_CHECK_SCALING = 10.0 * 60.0
 MAX_CHECK_SCALING = 60.0 * 60.0
@@ -2373,7 +2372,7 @@ class Game:
             else:
                 if not has_enough:
                     # only do a last call if it was a long term scheduling
-                    if self.check_delta >= MAX_CHECK_DELTA:
+                    if self.check_delta > MAX_CHECK_DELTA:
                         mention = self.base_mention
                         mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
                     else:
@@ -2859,7 +2858,7 @@ def process_time_control(control: str, args: list[str], gamer: discord.Member) -
     return attempt1, control
 
 
-CURRENT_GAME_ARGS = {"cancel", "now", "leave"}
+CURRENT_GAME_ARGS = {"cancel", "now", "leave", "but"}
 START_GAME_ARGS = {"at", "in", "on"}
 
 
@@ -2895,6 +2894,9 @@ async def consume_args(
                 f"Cannot start a {KEYWORD} when there is already one currently active.",
             )
             return None
+        if control == "but":
+            await client.current_game.cancel(created_at)
+            return options
         if control == "cancel":
             await client.current_game.cancel(created_at)
             return None

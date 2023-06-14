@@ -29,6 +29,7 @@ While it's started, anyone can say:
 * `cancel`: cancels the scheduled game.
 * `now`: skips ahead to finish the schedule now.
 * `leave`: leaves a scheduled game you joined.
+* `but`: restart the game with new starting arguments
 
 Either when starting it, or while it's started, you can say:
 
