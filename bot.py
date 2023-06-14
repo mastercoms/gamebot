@@ -271,6 +271,8 @@ class DotaAPI:
 
     @staticmethod
     async def get_matches(account_id: int, **params) -> list[dict[str, Any]] | None:
+        if not client.steamapi:
+            return None
         tries = 0
         while True:
             # this endpoint regularly fails, so we retry a few times
@@ -295,7 +297,13 @@ class DotaAPI:
         return resp
 
     @staticmethod
-    async def get_match(match_id: int) -> dict[str, Any] | None:
+    async def get_recent_matches(steam_id: int) -> list[dict[str, Any]]:
+        url = f"/players/{steam_id}/recentMatches"
+        resp = await DotaAPI.get(url)
+        return resp
+
+    @staticmethod
+    async def get_match_steam(match_id: int) -> dict[str, Any] | None:
         if not client.steamapi:
             return None
         tries = 0
@@ -315,6 +323,13 @@ class DotaAPI:
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"]
+
+    @staticmethod
+    async def get_match(match_id: int) -> dict[str, Any] | None:
+        match = await DotaAPI.get_match_steam(match_id)
+        if not match:
+            url = f"/matches/{match_id}"
+            return await DotaAPI.get(url)
 
 
 class SteamWorker:
@@ -1487,15 +1502,18 @@ class DotaMatch(Match):
         self.serialize = serialize
         self.account_ids = account_ids
         raw_friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
-        friend_ids = [
-            friend_id.account_id
-            for friend_id in raw_friend_ids
-            if friend_id
-            and friend_id in client.steamclient.steam.friends
-            and client.steamclient.steam.friends[friend_id].relationship
-            == EFriendRelationship.Friend
-        ]
-        if not friend_ids:
+        if client.steamclient:
+            friend_ids = [
+                friend_id.account_id
+                for friend_id in raw_friend_ids
+                if friend_id
+                and friend_id in client.steamclient.steam.friends
+                and client.steamclient.steam.friends[friend_id].relationship
+                == EFriendRelationship.Friend
+            ]
+            if not friend_ids:
+                friend_ids = raw_friend_ids
+        else:
             friend_ids = raw_friend_ids
         self.account_id = random.choice(friend_ids)
         self.gamer_ids = {gamer.id for gamer in gamers}
@@ -1805,6 +1823,8 @@ class DotaMatch(Match):
             self.account_id,
             matches_requested="1",
         )
+        if matches is None:
+            matches = await DotaAPI.get_recent_matches(self.account_id)
         if matches:
             match = matches[0]
             # we've seen this match before
@@ -1813,22 +1833,24 @@ class DotaMatch(Match):
                 return None
             DotaMatch.known_matches.add(match_id)
             # if this match wasn't relevant for the game we started
-            party_size = 0
-            fallback_team = None
-            for player in match["players"]:
-                player_account = player["account_id"]
-                if player_account in self.account_ids:
-                    party_size += 1
-                    if not fallback_team:
-                        fallback_team = player["team_number"]
-                if player_account == self.account_id:
-                    match["player_team"] = player["team_number"]
-            print_debug(f"account: {self.account_id}, team {match.get('player_team')}, fallback: {fallback_team}")
-            if not match.get("player_team"):
-                if fallback_team:
-                    match["player_team"] = fallback_team
-                else:
-                    match["player_team"] = 0
+            party_size = match.get("party_size", -1)
+            if party_size == -1:
+                party_size = 0
+                fallback_team = None
+                for player in match["players"]:
+                    player_account = player["account_id"]
+                    if player_account in self.account_ids:
+                        party_size += 1
+                        if not fallback_team:
+                            fallback_team = player["team_number"]
+                    if player_account == self.account_id:
+                        match["player_team"] = player["team_number"]
+                print_debug(f"account: {self.account_id}, team {match.get('player_team')}, fallback: {fallback_team}")
+                if not match.get("player_team"):
+                    if fallback_team:
+                        match["player_team"] = fallback_team
+                    else:
+                        match["player_team"] = 0
             party_size = party_size or 5
             print_debug(f"party_size: {party_size}")
             match["party_size"] = party_size
@@ -1857,8 +1879,12 @@ class DotaMatch(Match):
         self.polls += 1
         print_debug(f"Match: {match}")
         if match:
-            team_num = match["player_team"]
-            is_dire = team_num == 1
+            team_num = match.get("player_team")
+            if team_num is None:
+                is_dire = match.get("player_slot") > 127
+                team_num = 1 if is_dire else 0
+            else:
+                is_dire = team_num == 1
 
             # match ID
             match_id = match["match_id"]
@@ -3067,6 +3093,9 @@ async def consume_args(
     if control == "status":
         if not client.steamapi:
             await channel.send("Steam API is not configured.")
+            return None
+        if not client.steamclient:
+            await channel.send("Steam GC is not configured.")
             return None
         if handled == 0:
             await channel.send("Already querying a match, please try again later.")
