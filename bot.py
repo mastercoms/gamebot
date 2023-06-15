@@ -329,7 +329,8 @@ class DotaAPI:
         match = await DotaAPI.get_match_steam(match_id)
         if not match:
             url = f"/matches/{match_id}"
-            return await DotaAPI.get(url)
+            match = await DotaAPI.get(url)
+        return match
 
 
 class SteamWorker:
