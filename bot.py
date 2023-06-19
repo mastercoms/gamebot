@@ -1663,7 +1663,7 @@ class DotaMatch(Match):
                             diff = per_player_stats[team_id][key] - per_player_stats[other_team][key]
                             mag = abs(diff)
                             avg = (per_player_stats[team_id][key] + per_player_stats[other_team][key]) / 2
-                            pct = diff / avg if avg else 0
+                            pct = mag / avg if avg else 0
                             adv_map[key] = f"{diff:+d} ({pct:+.1%})"
                         adv_map["\u200B\u200B"] = "\u200B"
 
@@ -1955,8 +1955,7 @@ class DotaMatch(Match):
                         else:
                             adv_map[key] += (0, player[key])
 
-                adv_map["xp_per_min"] *= match_details["duration"] / 60.0
-                adv_map["xp_per_min"] = math.floor(adv_map["xp_per_min"])
+                adv_map["xp_per_min"] = tuple(math.floor(i * match_details["duration"] / 60.0) for i in adv_map["xp_per_min"])
 
                 embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
