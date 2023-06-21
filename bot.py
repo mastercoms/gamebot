@@ -1686,7 +1686,7 @@ class DotaMatch(Match):
                             mag = abs(diff)
                             avg = (per_player_stats[team_id][key] + per_player_stats[other_team][key]) / 2
                             pct = mag / avg if avg else 0
-                            adv_map[key] = f"{diff:+d} ({pct:+.1%})"
+                            adv_map[key] = f"{diff:+d} ({pct:.1%})"
                         adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
@@ -2003,7 +2003,7 @@ class DotaMatch(Match):
                 avg = (v[0] + v[1]) / 2
                 pct = mag / avg if avg else 0
                 label = DOTA_ADV_LABELS[k]
-                embed.add_field(name=label, value=f"{diff:+d} ({pct:+.1%})")
+                embed.add_field(name=label, value=f"{diff:+d} ({pct:.1%})")
 
         # rank
         rank, rank_icon = DOTA_RANKS.get(None)
