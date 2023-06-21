@@ -1677,8 +1677,8 @@ class DotaMatch(Match):
                             teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
                         )
                         adv_map = {
-                            "level": 0,
                             "net_worth": net_worth_adv,
+                            "level": 0,
                             "\u200B": "\u200B",
                         }
                         for key in per_player_stats[team_id]:
@@ -1901,7 +1901,7 @@ class DotaMatch(Match):
         self.polls += 1
         print_debug(f"Match: {match}")
         if match:
-            self.post_match(match, extras=True)
+            await self.post_match(match, extras=True)
         if self.polls < MATCH_MAX_POLLS:
             self.save()
             self.start_check()
@@ -1977,11 +1977,11 @@ class DotaMatch(Match):
 
         if match_details:
             adv_map = {
-                "xp_per_min": [0, 0],
                 "net_worth": [0, 0],
+                "xp_per_min": [0, 0],
                 "hero_damage": [0, 0],
-                "tower_damage": [0, 0],
                 "hero_healing": [0, 0],
+                "tower_damage": [0, 0],
                 "last_hits": [0, 0],
                 "denies": [0, 0],
             }
