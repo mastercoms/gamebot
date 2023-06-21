@@ -619,10 +619,11 @@ class GameClient(discord.ext.commands.Bot):
                 return
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
-            gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamers"]}
+            gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
             channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.known_matches = set(save["known_matches"])
+            restored_match.polls = save["polls"]
             restored_match.timestamp = timestamp
             self.current_match = restored_match
             self.current_match.start_check()
