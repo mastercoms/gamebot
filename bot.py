@@ -325,11 +325,17 @@ class DotaAPI:
         return resp["result"]
 
     @staticmethod
+    async def get_parsed_match(match_id: int) -> dict[str, Any] | None:
+        url = f"/matches/{match_id}"
+        match = await DotaAPI.get(url)
+        return match
+
+
+    @staticmethod
     async def get_match(match_id: int) -> dict[str, Any] | None:
         match = await DotaAPI.get_match_steam(match_id)
         if not match:
-            url = f"/matches/{match_id}"
-            match = await DotaAPI.get(url)
+            match = await DotaAPI.get_parsed_match(match_id)
         return match
 
 
@@ -870,7 +876,7 @@ class GameClient(discord.ext.commands.Bot):
                         remove_mark(options.game, gamer)
                         await channel.send("Removed your availability marker.")
                         return
-                    
+
                     # check if it's sufficiently in the future
                     if options.future:
                         delta = options.future - self.now
@@ -975,6 +981,9 @@ class GameClient(discord.ext.commands.Bot):
                         await self.current_game.start(options.future)
                         await self.current_game.add_initials(gamer, options.bucket)
                     elif options.future:
+                        if True:
+                            await channel.send(f"You can't change the time of a {KEYWORD_TITLE}")
+                            return
                         # if we're already checking, we can't change the time
                         if self.current_game.is_checking:
                             await channel.send(f"You can't change the time of a {KEYWORD_TITLE} Check.")
@@ -1152,7 +1161,7 @@ MATCH_POLL_INTERVAL_FIRST = MATCH_POLL_INTERVALS[0]
 MATCH_POLL_INTERVAL_LAST = MATCH_POLL_INTERVALS[MATCH_POLL_INTERVAL_COUNT - 1]
 MATCH_MAX_POLL_LENGTH = 2 * 60 * 60
 MATCH_MAX_POLLS = MATCH_MAX_POLL_LENGTH // MATCH_POLL_INTERVAL_LAST
-MATCH_WAIT_TIME = 60
+MATCH_WAIT_TIME = 15
 
 
 class Match:
@@ -1479,6 +1488,15 @@ async def fail_realtime(channel: discord.TextChannel, gamer: discord.Member, fmt
         await channel.send(fmt.format(gamer=gamer.display_name))
 
 
+NUM_STARS = 5
+
+
+def average_medal(values):
+    num_stars = [(int(str(value)[0]) * NUM_STARS) + (value % 10) for value in values]
+    avg_stars = sum(num_stars) / len(num_stars)
+    return math.floor(avg_stars / NUM_STARS) * 10 + max(1, round(avg_stars % NUM_STARS))
+
+
 class DotaMatch(Match):
     known_matches: set[int] = set()
     account_ids: set[int]
@@ -1501,23 +1519,27 @@ class DotaMatch(Match):
     ):
         self.serialize = serialize
         self.account_ids = account_ids
-        raw_friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
-        if client.steamclient:
-            friend_ids = [
-                friend_id.account_id
-                for friend_id in raw_friend_ids
-                if friend_id
-                and friend_id in client.steamclient.steam.friends
-                and client.steamclient.steam.friends[friend_id].relationship
-                == EFriendRelationship.Friend
-            ]
-            if not friend_ids:
+        if self.account_ids:
+            raw_friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
+            if client.steamclient:
+                friend_ids = [
+                    friend_id.account_id
+                    for friend_id in raw_friend_ids
+                    if friend_id
+                    and friend_id in client.steamclient.steam.friends
+                    and client.steamclient.steam.friends[friend_id].relationship
+                    == EFriendRelationship.Friend
+                ]
+                if not friend_ids:
+                    friend_ids = raw_friend_ids
+            else:
                 friend_ids = raw_friend_ids
+            self.account_id = random.choice(friend_ids)
+            self.party_size = len(account_ids)
         else:
-            friend_ids = raw_friend_ids
-        self.account_id = random.choice(friend_ids)
+            self.account_id = None
+            self.party_size = 6
         self.gamer_ids = {gamer.id for gamer in gamers}
-        self.party_size = len(account_ids)
         self.polls = 0
         self.channel = channel
         self.update_timestamp()
@@ -1879,115 +1901,7 @@ class DotaMatch(Match):
         self.polls += 1
         print_debug(f"Match: {match}")
         if match:
-            team_num = match.get("player_team")
-            if team_num is None:
-                is_dire = match.get("player_slot") > 127
-                team_num = 1 if is_dire else 0
-            else:
-                is_dire = team_num == 1
-
-            # match ID
-            match_id = match["match_id"]
-
-            # reset to keep looking for games
-            self.polls = 0
-            self.update_timestamp()
-
-            # wait for match details to be available
-            await asyncio.sleep(MATCH_WAIT_TIME)
-            match_details = await DotaAPI.get_match(match_id)
-
-            won = match_details["radiant_win"] ^ is_dire
-
-            # match time
-            match_time = generate_datetime(match["start_time"])
-
-            # create embed
-            embed = discord.Embed(
-                colour=discord.Colour.green() if won else discord.Colour.red(),
-                title=f"Match {match_id}",
-                url=f"https://www.dotabuff.com/matches/{match_id}",
-                timestamp=match_time,
-            )
-
-            # force max width embed
-            embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
-
-            # match type
-            embed.add_field(
-                name="Type",
-                value=DotaMatch.get_type(match_details),
-                inline=False,
-            )
-
-            # score
-            if match_details:
-                radiant_score = match_details["radiant_score"]
-                dire_score = match_details["dire_score"]
-                embed.add_field(
-                    name="Score",
-                    value=f"{radiant_score}-{dire_score}",
-                    inline=False,
-                )
-
-            # team
-            embed.add_field(
-                name="Team",
-                value="Dire" if is_dire else "Radiant",
-                inline=False,
-            )
-
-            if match_details:
-                adv_map = {
-                    "xp_per_min": (0, 0),
-                    "net_worth": (0, 0),
-                    "hero_damage": (0, 0),
-                    "tower_damage": (0, 0),
-                    "hero_healing": (0, 0),
-                    "last_hits": (0, 0),
-                    "denies": (0, 0),
-                }
-                for player in match_details["players"]:
-                    player_team = player["team_number"]
-                    for key in adv_map:
-                        if player_team == team_num:
-                            adv_map[key] += (player[key], 0)
-                        else:
-                            adv_map[key] += (0, player[key])
-
-                adv_map["xp_per_min"] = tuple(math.floor(i * match_details["duration"] / 60.0) for i in adv_map["xp_per_min"])
-
-                embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
-
-                for k, v in adv_map.items():
-                    diff = v[0] - v[1]
-                    mag = abs(diff)
-                    avg = (v[0] + v[1]) / 2
-                    pct = mag / avg if avg else 0
-                    label = DOTA_ADV_LABELS[k]
-                    embed.add_field(name=label, value=f"{diff:+d} ({pct:+.1%})")
-
-            # rank
-            basic_match = await self.get_basic_match(match_id)
-            if basic_match:
-                rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
-            else:
-                # TODO: calculate average player rank ourselves
-                rank, rank_icon = DOTA_RANKS.get(None)
-            embed.set_author(name=rank, icon_url=rank_icon)
-
-            # duration
-            embed.set_footer(
-                text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}",
-            )
-
-            # send
-            await self.channel.send(embed=embed)
-            if won:
-                if EXTRA_WIN_MESSAGE:
-                    await self.channel.send(EXTRA_WIN_MESSAGE)
-            elif EXTRA_LOSS_MESSAGE:
-                await self.channel.send(EXTRA_LOSS_MESSAGE)
+            self.post_match(match, extras=True)
         if self.polls < MATCH_MAX_POLLS:
             self.save()
             self.start_check()
@@ -1995,6 +1909,134 @@ class DotaMatch(Match):
             client.current_match = None
             del_value("match", table=client.backup_table)
             print_debug("Current match ended")
+
+    async def post_match(self, match, extras=False):
+        team_num = match.get("player_team")
+        if team_num is None:
+            is_dire = match.get("player_slot", 0) > 127
+            team_num = 1 if is_dire else 0
+        else:
+            is_dire = team_num == 1
+
+        # match ID
+        match_id = match["match_id"]
+
+        # reset to keep looking for games
+        if extras:
+            self.polls = 0
+            self.update_timestamp()
+
+        # wait for match details to be available
+        if extras:
+            await asyncio.sleep(MATCH_WAIT_TIME)
+        if extras:
+            match_details = await DotaAPI.get_match(match_id)
+        else:
+            match_details = match
+
+        won = match_details["radiant_win"] ^ is_dire
+
+        # match time
+        match_time = generate_datetime(match["start_time"])
+
+        # create embed
+        embed = discord.Embed(
+            colour=discord.Colour.green() if won else discord.Colour.red(),
+            title=f"Match {match_id}",
+            url=f"https://www.dotabuff.com/matches/{match_id}",
+            timestamp=match_time,
+        )
+
+        # force max width embed
+        embed.set_image(url="https://i.stack.imgur.com/Fzh0w.png")
+
+        # match type
+        embed.add_field(
+            name="Type",
+            value=DotaMatch.get_type(match_details),
+            inline=False,
+        )
+
+        # score
+        if match_details:
+            radiant_score = match_details["radiant_score"]
+            dire_score = match_details["dire_score"]
+            embed.add_field(
+                name="Score",
+                value=f"{radiant_score}-{dire_score}",
+                inline=False,
+            )
+
+        # team
+        if extras:
+            embed.add_field(
+                name="Team",
+                value="Dire" if is_dire else "Radiant",
+                inline=False,
+            )
+
+        if match_details:
+            adv_map = {
+                "xp_per_min": [0, 0],
+                "net_worth": [0, 0],
+                "hero_damage": [0, 0],
+                "tower_damage": [0, 0],
+                "hero_healing": [0, 0],
+                "last_hits": [0, 0],
+                "denies": [0, 0],
+            }
+            for player in match_details["players"]:
+                player_team = player.get("team_number", 1 if player["player_slot"] > 127 else 0)
+                for key in adv_map:
+                    if player_team == team_num:
+                        adv_map[key][0] += player[key]
+                    else:
+                        adv_map[key][1] += player[key]
+
+            adv_map["xp_per_min"] = tuple(math.floor(i * match_details["duration"] / 60.0) for i in adv_map["xp_per_min"])
+
+            embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
+
+            for k, v in adv_map.items():
+                diff = v[0] - v[1]
+                mag = abs(diff)
+                avg = (v[0] + v[1]) / 2
+                pct = mag / avg if avg else 0
+                label = DOTA_ADV_LABELS[k]
+                embed.add_field(name=label, value=f"{diff:+d} ({pct:+.1%})")
+
+        # rank
+        rank, rank_icon = DOTA_RANKS.get(None)
+        if extras:
+            basic_match = await self.get_basic_match(match_id)
+            if basic_match:
+                rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
+        if not rank and match_details:
+            ranked_match_details = match_details
+            if "rank_tier" not in match_details["players"][0]:
+                ranked_match_details = await DotaAPI.get_parsed_match(match_id)
+            ranks = []
+            for player in ranked_match_details["players"]:
+                if player["rank_tier"]:
+                    ranks.append(player["rank_tier"])
+            average_rank = average_medal(ranks)
+            rank, rank_icon = DOTA_RANKS.get(average_rank)
+
+        embed.set_author(name=rank, icon_url=rank_icon)
+
+        # duration
+        embed.set_footer(
+            text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}",
+        )
+
+        # send
+        await self.channel.send(embed=embed)
+        if extras:
+            if won:
+                if EXTRA_WIN_MESSAGE:
+                    await self.channel.send(EXTRA_WIN_MESSAGE)
+            elif EXTRA_LOSS_MESSAGE:
+                await self.channel.send(EXTRA_LOSS_MESSAGE)
 
 
 def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
@@ -2946,6 +2988,18 @@ async def consume_args(
             if confirmed_date:
                 options.future = confirmed_date
             return options
+    if control == "match":
+        if not args:
+            await channel.send(f"{KEYWORD} match <match id>\nSet the match ID to track.\n\n**Example:** {KEYWORD} match 7208943764")
+            return None
+        match_id = args.pop(0)
+        match_id = get_int(match_id, default=None)
+        if not match_id:
+            await channel.send(f"Match ID must be a number.")
+            return None
+        my_match = DotaMatch(set(), set(), channel, should_check=False, serialize=False)
+        await my_match.post_match(await DotaAPI.get_parsed_match(match_id))
+        return None
     if control == "register":
         if not args:
             await channel.send(
