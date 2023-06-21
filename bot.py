@@ -2020,7 +2020,6 @@ class DotaMatch(Match):
                 if player["rank_tier"]:
                     ranks.append(player["rank_tier"])
             average_rank = average_medal(ranks)
-            print(average_rank)
             rank, rank_icon = DOTA_RANKS.get(average_rank)
 
         embed.set_author(name=rank, icon_url=rank_icon)
