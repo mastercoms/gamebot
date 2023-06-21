@@ -1410,15 +1410,15 @@ DOTA_RANKS = {
         "https://static.wikia.nocookie.net/dota2_gamepedia/images/d/df/SeasonalRankTop1.png/revision/latest?cb=20180606220541",
     ),
     82: (
-        "Immortal",
+        "Immortal [ Top 1000 ]",
         "https://static.wikia.nocookie.net/dota2_gamepedia/images/a/ad/SeasonalRankTop2.png/revision/latest?cb=20180606220545",
     ),
     83: (
-        "Immortal",
+        "Immortal [ Top 100 ]",
         "https://static.wikia.nocookie.net/dota2_gamepedia/images/8/8e/SeasonalRankTop3.png/revision/latest?cb=20180606220548",
     ),
     84: (
-        "Immortal",
+        "Immortal [ Top 10 ]",
         "https://static.wikia.nocookie.net/dota2_gamepedia/images/4/46/SeasonalRankTop4.png/revision/latest?cb=20180606220552",
     ),
 }
@@ -2011,7 +2011,7 @@ class DotaMatch(Match):
             basic_match = await self.get_basic_match(match_id)
             if basic_match:
                 rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
-        if not rank and match_details:
+        if rank == "Unknown" and match_details:
             ranked_match_details = match_details
             if "rank_tier" not in match_details["players"][0]:
                 ranked_match_details = await DotaAPI.get_parsed_match(match_id)
@@ -2020,6 +2020,7 @@ class DotaMatch(Match):
                 if player["rank_tier"]:
                     ranks.append(player["rank_tier"])
             average_rank = average_medal(ranks)
+            print(average_rank)
             rank, rank_icon = DOTA_RANKS.get(average_rank)
 
         embed.set_author(name=rank, icon_url=rank_icon)
