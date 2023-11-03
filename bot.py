@@ -1498,6 +1498,14 @@ def average_medal(values):
     return math.floor(avg_stars / NUM_STARS) * 10 + max(1, round(avg_stars % NUM_STARS))
 
 
+def calc_pct_adv(us: float | int, them: float | int) -> str:
+    diff = us - them
+    mag = abs(diff)
+    avg = (us + them) / 2
+    pct = mag / avg if avg else 0
+    return f"{diff:+d} ({pct:.1%})"
+
+
 class DotaMatch(Match):
     known_matches: set[int] = set()
     account_ids: set[int]
@@ -1674,20 +1682,14 @@ class DotaMatch(Match):
                                 team_id = team_idx
                     if len(per_player_stats) == 2:
                         other_team = (team_id + 1) % 2
-                        net_worth_adv = (
-                            teams[team_id]["net_worth"] - teams[other_team]["net_worth"]
-                        )
+                        net_worth_adv = calc_pct_adv(teams[team_id]["net_worth"], teams[other_team]["net_worth"])
                         adv_map = {
                             "net_worth": net_worth_adv,
                             "level": 0,
                             "\u200B": "\u200B",
                         }
                         for key in per_player_stats[team_id]:
-                            diff = per_player_stats[team_id][key] - per_player_stats[other_team][key]
-                            mag = abs(diff)
-                            avg = (per_player_stats[team_id][key] + per_player_stats[other_team][key]) / 2
-                            pct = mag / avg if avg else 0
-                            adv_map[key] = f"{diff:+d} ({pct:.1%})"
+                            adv_map[key] = calc_pct_adv(per_player_stats[team_id][key], per_player_stats[other_team][key])
                         adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
@@ -1999,12 +2001,9 @@ class DotaMatch(Match):
             embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
             for k, v in adv_map.items():
-                diff = v[0] - v[1]
-                mag = abs(diff)
-                avg = (v[0] + v[1]) / 2
-                pct = mag / avg if avg else 0
+                value = calc_pct_adv(v[0], v[1])
                 label = DOTA_ADV_LABELS[k]
-                embed.add_field(name=label, value=f"{diff:+d} ({pct:.1%})")
+                embed.add_field(name=label, value=value)
 
         # rank
         rank, rank_icon = DOTA_RANKS.get(None)
