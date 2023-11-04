@@ -158,7 +158,7 @@ def get_hero_name(hero_page):
     :param hero_page: hero's responses page as string.
     :return: Hero name as parsed
     """
-    return hero_page.split('/')[0]
+    return hero_page.replace('/Responses', '')
 
 
 async def create_responses_text_and_link_list(responses_source):
@@ -215,7 +215,7 @@ def parse_response(text):
                          r'{{resp\|(r|u|\d+|d\|\d+|rem)}}',  # Remove response rarity
                          r'{{hero icon\|[a-z- \']+\|\d+px}}',  # Remove hero icon
                          r'{{item( icon)?\|[a-z0-9() \']+\|\d+px}}',  # Remove item icon
-                         r'\[\[File:[a-z.,!\'() ]+\|\d+px\|link=[a-z,!\'() ]+]]',  # Remove Files
+                         r'\[\[File:[a-z.,!\'() ]+\|\d+px(\|link=[a-z,!\'() ]+)?(\|class=[a-z]+)?]]', # Remove Files
                          r'<small>\[\[#[a-z0-9_\-\' ]+\|\'\'followup\'\']]</small>',
                          # Remove followup links in <small> tags
                          r'<small>\'\'[a-z0-9 /]+\'\'</small>',  # Remove text in <small> tags
@@ -226,10 +226,11 @@ def parse_response(text):
         text = re.sub(regex, '', text, flags=re.IGNORECASE)
 
     regexps_sub_text = [r'\[\[([a-zé().:\',\- ]+)]]',  # Replace links such as [[Shitty Wizard]]
-                        r'\[\[[a-zé0-9().:\'/# ]+\|([a-zé().:\' ]+)]]',
+                        r'\[\[[a-zé0-9().:\'/#-_ ]+\|([a-zé0-9().:\'/#-_ ]+)]]',
                         # Replace links such as [[Ancient (Building)|Ancients]], [[:File:Axe|Axe]] and [[Terrorblade#Sunder|sundering]]
                         r'{{tooltip\|(.*?)\|.*?}}',  # Replace tooltips
                         r'{{note\|([a-z.!\'\-?, ]+)\|[a-z.!\'\-?,()/ ]+}}',  # Replace notes
+                        r'{{H\|([a-z.!\'\-?,()/ ]+)}}', # Replace heroes
                         ]
     for regex in regexps_sub_text:
         text = re.sub(regex, '\\1', text, flags=re.IGNORECASE)
