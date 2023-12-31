@@ -22,7 +22,7 @@ When starting it, you can also say some arguments:
 
 * `at <time>`: set a specific date/time to check at. ex: `at 9`, `at 9pm`, `at 9pm PST`, `at 9:30`, etc.
 * `in <time>`: set a length of time to check at. ex: `in 1h`, `in 1.5h`, `in 5m`, `in 5 mins`, `in 5 hours, 20 minutes, 30 seconds`, etc.
-* `on <game>`: set the name of the game to schedule.
+* `for <game>`: set the name of the game to schedule.
 
 While it's started, anyone can say:
 

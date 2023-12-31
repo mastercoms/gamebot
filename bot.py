@@ -229,30 +229,42 @@ class DiscordUtil:
 
 
 class DotaAPI:
+    resources = ["cluster", "lobby_type", "game_mode", "region", "xp_level"]
+    last_constants_query: datetime.datetime = datetime.datetime.min
+
     @staticmethod
     async def get(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
         resp = await client.opendota.get(*args, **kwargs)
+        if resp.status_code != 200:
+            print("Failed to get:", resp.status_code, resp.text)
+            return None
         return resp.json()
 
     @staticmethod
-    async def query_constants(*resources: str) -> dict[str, dict[str, Any]]:
+    async def query_constants():
+        now = utcnow()
+        if (now - DotaAPI.last_constants_query) < datetime.timedelta(hours=12):
+            return DOTA_CACHED_CONSTANTS
+        DotaAPI.last_constants_query = now
         async with httpx.AsyncClient(
             base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/",
         ) as odotagh:
-            for res in resources:
+            for res in DotaAPI.resources:
                 url = f"{res}.json"
-                DOTA_CACHED_CONSTANTS[res] = (await odotagh.get(url)).json()
-        print_debug(f"Queried {resources} constants: {DOTA_CACHED_CONSTANTS}")
+                resp = await odotagh.get(url)
+                if resp.status_code != 200:
+                    print("Failed to get:", resp.status_code, resp.text)
+                    DotaAPI.last_constants_query = datetime.datetime.min
+                    continue
+                DOTA_CACHED_CONSTANTS[res] = resp.json()
+        print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
+
+    @staticmethod
+    def get_constants() -> dict[str, dict[str, Any]]:
         return DOTA_CACHED_CONSTANTS
 
     @staticmethod
-    def get_constants(*resources: str) -> dict[str, dict[str, Any]]:
-        for res in resources:
-            DOTA_CACHED_CONSTANTS[res] = DOTA_CACHED_CONSTANTS.get(res)
-        return DOTA_CACHED_CONSTANTS
-
-    @staticmethod
-    def query_constant_name(
+    def get_constant_name(
         constants: dict[str, dict[str, Any]],
         resource: str,
         idx: int,
@@ -262,12 +274,18 @@ class DotaAPI:
         return data["name"].replace(f"{resource}_", "").replace("_", " ").title()
 
     @staticmethod
-    def query_match_constant(
-        constants: dict[str, dict[str, Any]],
+    def get_match_constant(
         match: dict[str, Any],
         resource: str,
     ):
-        return DotaAPI.query_constant_name(constants, resource, match[resource])
+        return DotaAPI.get_constant_name(
+            DOTA_CACHED_CONSTANTS, resource, match[resource]
+        )
+
+    @staticmethod
+    def get_region(cluster: int) -> str:
+        region = DOTA_CACHED_CONSTANTS["cluster"][str(cluster)]
+        return DOTA_CACHED_CONSTANTS["region"][str(region)]
 
     @staticmethod
     async def get_matches(account_id: int, **params) -> list[dict[str, Any]] | None:
@@ -325,11 +343,15 @@ class DotaAPI:
         return resp["result"]
 
     @staticmethod
+    async def request_parse(match_id: int) -> None:
+        await client.opendota.post(f"/request/{match_id}")
+        return None
+
+    @staticmethod
     async def get_parsed_match(match_id: int) -> dict[str, Any] | None:
         url = f"/matches/{match_id}"
         match = await DotaAPI.get(url)
         return match
-
 
     @staticmethod
     async def get_match(match_id: int) -> dict[str, Any] | None:
@@ -383,6 +405,9 @@ class SteamWorker:
             print(
                 f"Reconnect in {delay}...",
             )
+            # reconnect dota client as well
+            client.dotaclient.exit()
+            client.dotaclient.launch()
 
         @worker.friends.on("friend_invite")
         def handle_friend_invite(user: SteamUser):
@@ -560,17 +585,11 @@ class GameClient(discord.ext.commands.Bot):
             await self._connector.close()
         if self.steamclient:
             self.steamclient.close()
-        if self.dotaclient:
-            self.dotaclient.exit()
         await super().close()
 
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
-        if (
-            not save
-            or self.current_game
-            or self.current_match
-        ):
+        if not save or self.current_game or self.current_match:
             return
         try:
             channel = self.guild.get_channel(save["channel"])
@@ -598,7 +617,9 @@ class GameClient(discord.ext.commands.Bot):
             restored_game.base_mention = save["base_mention"]
             restored_game.check_delta = datetime.timedelta(seconds=save["check_delta"])
             if save["scheduled_event"]:
-                restored_game.scheduled_event = self.guild.get_scheduled_event(save["scheduled_event"])
+                restored_game.scheduled_event = self.guild.get_scheduled_event(
+                    save["scheduled_event"]
+                )
             self.current_game = restored_game
             self.current_game.start_countdown()
         except Exception:
@@ -607,11 +628,7 @@ class GameClient(discord.ext.commands.Bot):
 
     async def restore_match(self):
         save = get_value("match", table=self.backup_table)
-        if (
-            not save
-            or self.current_game
-            or self.current_match
-        ):
+        if not save or self.current_game or self.current_match:
             return
         try:
             timestamp = save["timestamp"]
@@ -622,7 +639,7 @@ class GameClient(discord.ext.commands.Bot):
             gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
             channel = self.guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
-            restored_match.known_matches = set(save["known_matches"])
+            restored_match.last_match = save["last_match"]
             restored_match.polls = save["polls"]
             restored_match.timestamp = timestamp
             self.current_match = restored_match
@@ -710,7 +727,9 @@ class GameClient(discord.ext.commands.Bot):
                 except Exception:
                     cache_path.unlink(missing_ok=True)
                     if tries >= 3:
-                        print("Failed to download voice response:", traceback.format_exc())
+                        print(
+                            "Failed to download voice response:", traceback.format_exc()
+                        )
                         await get_channel(channel).send(
                             "Error: failed to download response, please try again",
                         )
@@ -731,9 +750,7 @@ class GameClient(discord.ext.commands.Bot):
             def play(path: Path):
                 voice_client.play(
                     discord.FFmpegOpusAudio(str(path)),
-                    after=lambda err: dispatch_task(
-                        disconnect()
-                    ),
+                    after=lambda err: dispatch_task(disconnect()),
                 )
 
             async def disconnect():
@@ -776,7 +793,9 @@ class GameClient(discord.ext.commands.Bot):
             return False
         return True
 
-    async def on_scheduled_event_user_add(self, event: discord.ScheduledEvent, user: discord.User):
+    async def on_scheduled_event_user_add(
+        self, event: discord.ScheduledEvent, user: discord.User
+    ):
         if not self.current_game:
             return
 
@@ -790,7 +809,9 @@ class GameClient(discord.ext.commands.Bot):
 
         await self.current_game.add_gamer(member, BUCKET_MIN, skip_exist=True)
 
-    async def on_scheduled_event_user_remove(self, event: discord.ScheduledEvent, user: discord.User):
+    async def on_scheduled_event_user_remove(
+        self, event: discord.ScheduledEvent, user: discord.User
+    ):
         if not self.current_game:
             return
 
@@ -814,7 +835,9 @@ class GameClient(discord.ext.commands.Bot):
         self.current.game.scheduled_event = None
         await self.current_game.cancel(utcnow())
 
-    async def on_scheduled_event_update(self, before: discord.ScheduledEvent, after: discord.ScheduledEvent):
+    async def on_scheduled_event_update(
+        self, before: discord.ScheduledEvent, after: discord.ScheduledEvent
+    ):
         if not self.current_game:
             return
 
@@ -831,7 +854,10 @@ class GameClient(discord.ext.commands.Bot):
             await self.current_game.cancel(utcnow())
 
         if before.start_time != after.start_time:
-            await after.edit(start_time=before.start_time, reason="Game start time cannot be changed.")
+            await after.edit(
+                start_time=before.start_time,
+                reason="Game start time cannot be changed.",
+            )
 
     async def on_message(self, message: discord.Message):
         """
@@ -849,7 +875,9 @@ class GameClient(discord.ext.commands.Bot):
         try:
             is_cmd = is_game_command(message.content.lower())
             if not is_cmd and has_mention:
-                message.content = original_content.replace(f"<@{client.user.id}>", KEYWORD).strip()
+                message.content = original_content.replace(
+                    f"<@{client.user.id}>", KEYWORD
+                ).strip()
                 is_cmd = is_game_command(message.content.lower())
             if is_cmd:
                 async with self.lock:
@@ -888,7 +916,9 @@ class GameClient(discord.ext.commands.Bot):
 
                     if options.start:
                         if not options.future:
-                            await channel.send("Cannot mark availability so close to now.")
+                            await channel.send(
+                                "Cannot mark availability so close to now."
+                            )
                             return
                         self.current_marks[options.game][gamer] = (
                             DateTimeRange(options.start, options.future),
@@ -907,10 +937,16 @@ class GameClient(discord.ext.commands.Bot):
                                     old_marks[game].append(marker)
                                     continue
                                 game_intersections[game].append(dtrange)
-                                current_min_game_bucket, _min_marker = min_game_bucket.get(game, (math.inf, None))
+                                (
+                                    current_min_game_bucket,
+                                    _min_marker,
+                                ) = min_game_bucket.get(game, (math.inf, None))
                                 if min_bucket < current_min_game_bucket:
                                     min_game_bucket[game] = (min_bucket, marker)
-                                current_max_game_bucket, _max_marker = max_game_bucket.get(game, (0, None))
+                                (
+                                    current_max_game_bucket,
+                                    _max_marker,
+                                ) = max_game_bucket.get(game, (0, None))
                                 if min_bucket > current_max_game_bucket:
                                     max_game_bucket[game] = (min_bucket, marker)
                                 saved_marks[game][str(marker.id)] = [
@@ -933,14 +969,24 @@ class GameClient(discord.ext.commands.Bot):
                                     max_count = 1
                                     best_intersection = None
                                     comparisons = list(itertools.permutations(dtranges))
-                                    print_debug("dtrange comparisons", game, comparisons)
+                                    print_debug(
+                                        "dtrange comparisons", game, comparisons
+                                    )
                                     for comparison in comparisons:
                                         count = 1
                                         intersection = comparison[0]
-                                        print_debug("dtrange intersection", game, intersection)
+                                        print_debug(
+                                            "dtrange intersection", game, intersection
+                                        )
                                         for dtrange in comparison[1:]:
-                                            intersection = intersection.intersection(dtrange)
-                                            print_debug("dtrange intersection", game, intersection)
+                                            intersection = intersection.intersection(
+                                                dtrange
+                                            )
+                                            print_debug(
+                                                "dtrange intersection",
+                                                game,
+                                                intersection,
+                                            )
                                             if not intersection:
                                                 break
                                             count += 1
@@ -952,7 +998,9 @@ class GameClient(discord.ext.commands.Bot):
                                         print_debug("starting", game, best_intersection)
                                         starting_game = True
                                         options.game = game
-                                        options.future = best_intersection.start_datetime
+                                        options.future = (
+                                            best_intersection.start_datetime
+                                        )
                                         min_bucket, min_marker = min_game_bucket[game]
                                         options.bucket = min_bucket
                                         gamer = min_marker
@@ -960,7 +1008,9 @@ class GameClient(discord.ext.commands.Bot):
                                         if options.future:
                                             delta = options.future - self.now
                                             if delta <= MAX_CHECK_DELTA:
-                                                options.future = self.now + MIN_SCHEDULED_DELTA
+                                                options.future = (
+                                                    self.now + MIN_SCHEDULED_DELTA
+                                                )
 
                         if not starting_game:
                             min_bucket, max_bucket = get_bucket_bounds(
@@ -977,17 +1027,23 @@ class GameClient(discord.ext.commands.Bot):
                         # if didn't get a date, default to delta
                         if not options.future:
                             options.future = self.now + MIN_CHECK_DELTA
+                        # check for game update for constants
+                        await DotaAPI.query_constants()
                         print_debug("Starting game", options.future, gamer)
                         self.current_game = Game(channel, gamer, options.game)
                         await self.current_game.start(options.future)
                         await self.current_game.add_initials(gamer, options.bucket)
                     elif options.future:
                         if True:
-                            await channel.send(f"You can't change the time of a {KEYWORD_TITLE}")
+                            await channel.send(
+                                f"You can't change the time of a {KEYWORD_TITLE}"
+                            )
                             return
                         # if we're already checking, we can't change the time
                         if self.current_game.is_checking:
-                            await channel.send(f"You can't change the time of a {KEYWORD_TITLE} Check.")
+                            await channel.send(
+                                f"You can't change the time of a {KEYWORD_TITLE} Check."
+                            )
                             return
                         # if we're not checking, we can change the time
                         else:
@@ -1507,7 +1563,7 @@ def calc_pct_adv(us: float | int, them: float | int) -> str:
 
 
 class DotaMatch(Match):
-    known_matches: set[int] = set()
+    last_match: int = 0
     account_ids: set[int]
     account_id: int
     gamer_ids: set[int]
@@ -1529,7 +1585,9 @@ class DotaMatch(Match):
         self.serialize = serialize
         self.account_ids = account_ids
         if self.account_ids:
-            raw_friend_ids = [try_steam_id(account_id) for account_id in list(account_ids)]
+            raw_friend_ids = [
+                try_steam_id(account_id) for account_id in list(account_ids)
+            ]
             if client.steamclient:
                 friend_ids = [
                     friend_id.account_id
@@ -1565,7 +1623,7 @@ class DotaMatch(Match):
         if not self.serialize:
             return
         data = {
-            "known_matches": list(self.known_matches),
+            "last_match": self.last_match,
             "account_ids": list(self.account_ids),
             "gamer_ids": list(self.gamer_ids),
             "timestamp": self.timestamp,
@@ -1601,9 +1659,8 @@ class DotaMatch(Match):
     @staticmethod
     def get_type(match: dict[str, Any]) -> str:
         # match type
-        resources = DotaAPI.get_constants("lobby_type", "game_mode")
-        lobby_type = DotaAPI.query_match_constant(resources, match, "lobby_type")
-        game_mode = DotaAPI.query_match_constant(resources, match, "game_mode")
+        lobby_type = DotaAPI.get_match_constant(match, "lobby_type")
+        game_mode = DotaAPI.get_match_constant(match, "game_mode")
         return f"{lobby_type} {game_mode}"
 
     async def query_realtime(self, channel: discord.TextChannel, gamer: discord.Member):
@@ -1640,8 +1697,16 @@ class DotaMatch(Match):
                         break
                     except Exception:
                         if tries >= 10:
-                            print("Failed to get realtime stats:", traceback.format_exc())
-                            dispatch_task(fail_realtime(channel, gamer, "Match for {{gamer}} not started yet."))
+                            print(
+                                "Failed to get realtime stats:", traceback.format_exc()
+                            )
+                            dispatch_task(
+                                fail_realtime(
+                                    channel,
+                                    gamer,
+                                    "Match for {{gamer}} not started yet.",
+                                )
+                            )
                             return
                         wait_backoff(tries)
                 match = resp["match"]
@@ -1662,7 +1727,7 @@ class DotaMatch(Match):
                 }
                 adv_map = None
                 if teams:
-                    level_to_xp = DotaAPI.get_constants("xp_level")["xp_level"]
+                    level_to_xp = DotaAPI.get_constants()["xp_level"]
                     for team in teams:
                         team_idx = team["team_number"] - 2
                         if team_idx not in per_player_stats:
@@ -1682,14 +1747,19 @@ class DotaMatch(Match):
                                 team_id = team_idx
                     if len(per_player_stats) == 2:
                         other_team = (team_id + 1) % 2
-                        net_worth_adv = calc_pct_adv(teams[team_id]["net_worth"], teams[other_team]["net_worth"])
+                        net_worth_adv = calc_pct_adv(
+                            teams[team_id]["net_worth"], teams[other_team]["net_worth"]
+                        )
                         adv_map = {
                             "net_worth": net_worth_adv,
                             "level": 0,
                             "\u200B": "\u200B",
                         }
                         for key in per_player_stats[team_id]:
-                            adv_map[key] = calc_pct_adv(per_player_stats[team_id][key], per_player_stats[other_team][key])
+                            adv_map[key] = calc_pct_adv(
+                                per_player_stats[team_id][key],
+                                per_player_stats[other_team][key],
+                            )
                         adv_map["\u200B\u200B"] = "\u200B"
 
                 buildings = resp.get("buildings")
@@ -1829,19 +1899,22 @@ class DotaMatch(Match):
 
                 dispatch_task(res_realtime(channel, embed))
             elif live_result == 4 or live_result == 0:
-                dispatch_task(fail_realtime(channel, gamer, "No live match found for {gamer}."))
+                dispatch_task(
+                    fail_realtime(channel, gamer, "No live match found for {gamer}.")
+                )
             else:
                 dispatch_task(
                     fail_realtime(
                         channel,
                         gamer,
-                        "Failed to get live match data for {{gamer}}: error code {code}".format(code=live_result),
+                        "Failed to get live match data for {{gamer}}: error code {code}".format(
+                            code=live_result
+                        ),
                     ),
                 )
 
         client.dotaclient.once(EDOTAGCMsg.EMsgGCSpectateFriendGameResponse, handle_resp)
         await race_realtime(channel, gamer)
-
 
     async def get_recent_match(self) -> dict[str, Any] | None:
         matches: list[dict[str, Any]] = await DotaAPI.get_matches(
@@ -1854,9 +1927,10 @@ class DotaMatch(Match):
             match = matches[0]
             # we've seen this match before
             match_id = match["match_id"]
-            if match_id in DotaMatch.known_matches:
+            print_debug(f"last match: {DotaMatch.last_match}, this match: {match_id}")
+            if match_id == DotaMatch.last_match:
                 return None
-            DotaMatch.known_matches.add(match_id)
+            DotaMatch.last_match = match_id
             # if this match wasn't relevant for the game we started
             party_size = match.get("party_size", -1)
             if party_size == -1:
@@ -1870,7 +1944,9 @@ class DotaMatch(Match):
                             fallback_team = player["team_number"]
                     if player_account == self.account_id:
                         match["player_team"] = player["team_number"]
-                print_debug(f"account: {self.account_id}, team {match.get('player_team')}, fallback: {fallback_team}")
+                print_debug(
+                    f"account: {self.account_id}, team {match.get('player_team')}, fallback: {fallback_team}"
+                )
                 if not match.get("player_team"):
                     if fallback_team:
                         match["player_team"] = fallback_team
@@ -1882,7 +1958,9 @@ class DotaMatch(Match):
             if party_size < self.party_size:
                 return None
             # if this match started before the game started
-            if match["start_time"] < self.timestamp:
+            start_time = match["start_time"]
+            print_debug(f"check times: {start_time} < {self.timestamp}")
+            if start_time < self.timestamp:
                 return None
             return match
         return None
@@ -1932,6 +2010,9 @@ class DotaMatch(Match):
         # wait for match details to be available
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
+        DotaAPI.request_parse(match_id)
+        if extras:
+            await asyncio.sleep(MATCH_WAIT_TIME)
         if extras:
             match_details = await DotaAPI.get_match(match_id)
         else:
@@ -1957,7 +2038,21 @@ class DotaMatch(Match):
         embed.add_field(
             name="Type",
             value=DotaMatch.get_type(match_details),
-            inline=False,
+            inline=True,
+        )
+
+        # match region
+        embed.add_field(
+            name="Region",
+            value=DotaAPI.get_region(match_details["cluster"]),
+            inline=True,
+        )
+
+        # match links
+        embed.add_field(
+            name="Links",
+            value=f"[Dotabuff](https://www.dotabuff.com/matches/{match_id}) | [OpenDota](https://www.opendota.com/matches/{match_id}) | [Stratz](https://stratz.com/matches/{match_id})",
+            inline=True,
         )
 
         # score
@@ -1989,14 +2084,19 @@ class DotaMatch(Match):
                 "denies": [0, 0],
             }
             for player in match_details["players"]:
-                player_team = player.get("team_number", 1 if player["player_slot"] > 127 else 0)
+                player_team = player.get(
+                    "team_number", 1 if player["player_slot"] > 127 else 0
+                )
                 for key in adv_map:
                     if player_team == team_num:
                         adv_map[key][0] += player[key]
                     else:
                         adv_map[key][1] += player[key]
 
-            adv_map["xp_per_min"] = tuple(math.floor(i * match_details["duration"] / 60.0) for i in adv_map["xp_per_min"])
+            adv_map["xp_per_min"] = tuple(
+                math.floor(i * match_details["duration"] / 60.0)
+                for i in adv_map["xp_per_min"]
+            )
 
             embed.add_field(name="Team Advantage", value="⎯" * 40, inline=False)
 
@@ -2129,7 +2229,9 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
-            "scheduled_event": self.scheduled_event.id if self.scheduled_event else None,
+            "scheduled_event": self.scheduled_event.id
+            if self.scheduled_event
+            else None,
         }
         set_value("saved", data, table=client.backup_table)
 
@@ -2267,7 +2369,9 @@ class Game:
         """
         await self.update_message(self.message.content.replace(old, new))
 
-    async def add_gamer(self, gamer: discord.Member, min_bucket: int, skip_exist: bool = False):
+    async def add_gamer(
+        self, gamer: discord.Member, min_bucket: int, skip_exist: bool = False
+    ):
         """
         Sets a gamer to the specified buckets.
         """
@@ -2290,7 +2394,9 @@ class Game:
             cap = max_bucket + overfill
             size = len(self.gamer_buckets)
             if size >= cap:
-                await self.channel.send(f"{KEYWORD} is full. {gamer.display_name} cannot join.")
+                await self.channel.send(
+                    f"{KEYWORD} is full. {gamer.display_name} cannot join."
+                )
                 return
 
         # add them from that bucket and beyond
@@ -2414,7 +2520,9 @@ class Game:
             else:
                 if not has_enough:
                     # only do a last call if it was a long term scheduling
-                    if self.check_delta > MAX_CHECK_DELTA and get_value("is_last_call_enabled", table=client.settings_table):
+                    if self.check_delta > MAX_CHECK_DELTA and get_value(
+                        "is_last_call_enabled", table=client.settings_table
+                    ):
                         mention = self.base_mention
                         mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
                     else:
@@ -2422,9 +2530,13 @@ class Game:
                 if success:
                     print_debug("Starting check")
                     # start the game up again
-                    client.now = self.future  # this is the time we should have landed on
+                    client.now = (
+                        self.future
+                    )  # this is the time we should have landed on
                     self.reset()
-                    create_task(self.start(client.now + self.check_delta, mention=mention))
+                    create_task(
+                        self.start(client.now + self.check_delta, mention=mention)
+                    )
                     return False
         if not success:
             self.cancellable = False
@@ -2441,7 +2553,9 @@ class Game:
             if EXTRA_FAILURE_MESSAGE:
                 await self.channel.send(EXTRA_FAILURE_MESSAGE)
             if self.scheduled_event:
-                await self.scheduled_event.cancel(reason=f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}")
+                await self.scheduled_event.cancel(
+                    reason=f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}"
+                )
         if self.is_checking:
             # make it past tense
             await self.replace_message("expires", "expired")
@@ -2650,7 +2764,11 @@ def process_in(args: list[str]) -> datetime.datetime | None:
         if word[0] in NUMERIC:
             # TODO: make this detection more generic so people can combine a shorthand with other quantities
             # if it's just a raw quanity, add a shorthand unit so it can be handled
-            if word[len(word) - 1] in NUMERIC and (end + 1 >= last or args[end + 1].lower() in NON_TIME_WORDS or args[end + 1].lower() == "and"):
+            if word[len(word) - 1] in NUMERIC and (
+                end + 1 >= last
+                or args[end + 1].lower() in NON_TIME_WORDS
+                or args[end + 1].lower() == "and"
+            ):
                 word += "m"
             # now check if there's a shorthand unit at the end of the quantity
             if word[len(word) - 1] not in NUMERIC:
@@ -2705,7 +2823,20 @@ def process_in(args: list[str]) -> datetime.datetime | None:
     return confirmed_date
 
 
-MONTHS = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'November', 'december'}
+MONTHS = {
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "November",
+    "december",
+}
 NEXT_PERIOD = datetime.timedelta(hours=12)
 
 
@@ -2735,7 +2866,13 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
         # combine if space
         if last > end + 1:
             period = args[end + 1].lower()
-            if period == "pm" or period == "am" or period == "p" or period == "a" or period == "z":
+            if (
+                period == "pm"
+                or period == "am"
+                or period == "p"
+                or period == "a"
+                or period == "z"
+            ):
                 word += period
                 end += 1
         is_tz_str = False
@@ -2854,10 +2991,13 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
             confirmed_date += NEXT_PERIOD
     return confirmed_date
 
+
 TIME_CONTROLS = {"in", "at"}
 
 
-def process_time_control(control: str, args: list[str], gamer: discord.Member) -> tuple[datetime.datetime | None, str]:
+def process_time_control(
+    control: str, args: list[str], gamer: discord.Member
+) -> tuple[datetime.datetime | None, str]:
     if control not in TIME_CONTROLS:
         args.insert(0, control)
         control = "in"
@@ -2906,6 +3046,7 @@ START_GAME_ARGS = {"at", "in", "on"}
 
 def remove_mark(game: str, gamer: discord.Member):
     if client.current_marks[game].pop(gamer, None):
+
         def clean_mark(old):
             old[game].pop(str(gamer.id), None)
             return old
@@ -2955,10 +3096,10 @@ async def consume_args(
                 f"Cannot control a {KEYWORD} when there is none currently active.",
             )
             return None
-        if control == "on":
+        if control == "for":
             if not args:
                 await channel.send(
-                    f"{KEYWORD} on <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} on {GAMES[0]}",
+                    f"{KEYWORD} for <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} for {GAMES[0]}",
                 )
                 return None
             game = args.pop(0).lower()
@@ -2990,11 +3131,13 @@ async def consume_args(
             return options
     if control == "match":
         if not args:
-            await channel.send(f"{KEYWORD} match <match id>\nSet the match ID to track.\n\n**Example:** {KEYWORD} match 7208943764")
+            await channel.send(
+                f"{KEYWORD} match <match id>\nSet the match ID to query.\n\n**Example:** {KEYWORD} match 7208943764"
+            )
             return None
         match_id = args.pop(0)
         match_id = get_int(match_id, default=None)
-        if not match_id:
+        if match_id == None:
             await channel.send(f"Match ID must be a number.")
             return None
         my_match = DotaMatch(set(), set(), channel, should_check=False, serialize=False)
@@ -3072,7 +3215,10 @@ async def consume_args(
             else:
                 b_timezones = io.BytesIO(get_timezone_list_bytes())
                 timezone_list = discord.File(b_timezones, "timezones.txt")
-                await channel.send("Timezone not found. Please use an Olson/IANA timezone. Available timezones are attached.", file=timezone_list)
+                await channel.send(
+                    "Timezone not found. Please use an Olson/IANA timezone. Available timezones are attached.",
+                    file=timezone_list,
+                )
                 return None
         await channel.send(
             f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `{KEYWORD} at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
@@ -3123,10 +3269,18 @@ async def consume_args(
     if control == "mark":
         if args:
             time_control = args.pop(0).lower()
-            if time_control == "rm" or time_control == "remove" or time_control == "clear" or time_control == "delete" or time_control == "del":
+            if (
+                time_control == "rm"
+                or time_control == "remove"
+                or time_control == "clear"
+                or time_control == "delete"
+                or time_control == "del"
+            ):
                 options.remove_mark = True
                 return options
-            start_datetime, start_time_control = process_time_control(time_control, args, gamer)
+            start_datetime, start_time_control = process_time_control(
+                time_control, args, gamer
+            )
             if start_datetime and args:
                 sep = args.pop(0).lower()
                 end_datetime = None
@@ -3138,7 +3292,9 @@ async def consume_args(
                     else:
                         time_control = start_time_control
                     if args:
-                        end_datetime, _end_time_control = process_time_control(time_control, args, gamer)
+                        end_datetime, _end_time_control = process_time_control(
+                            time_control, args, gamer
+                        )
                 if end_datetime:
                     options.start = start_datetime
                     options.future = end_datetime
@@ -3182,7 +3338,9 @@ async def consume_args(
                 await channel.send(f"No live match found for {member.display_name}.")
                 return None
         elif not match:
-            await channel.send(f"There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name")
+            await channel.send(
+                f"There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name"
+            )
             return None
         if not member:
             # if we're in this match, just use us
@@ -3286,7 +3444,7 @@ async def main(debug, no_2fa):
         )
 
         # cache constants
-        await DotaAPI.query_constants("lobby_type", "game_mode", "xp_level")
+        await DotaAPI.query_constants()
 
         # start the client
         async with client as _client:
