@@ -2010,9 +2010,14 @@ class DotaMatch(Match):
             self.polls = 0
             self.update_timestamp()
 
+        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
+            utcnow() - generate_datetime(match["start_time"])
+        )
+        detail_wait = detail_wait_time.total_seconds()
+
         # wait for match details to be available
-        if extras:
-            await asyncio.sleep(MATCH_WAIT_TIME)
+        if extras and detail_wait > 0:
+            await asyncio.sleep(detail_wait)
         DotaAPI.request_parse(match_id)
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
@@ -2055,7 +2060,7 @@ class DotaMatch(Match):
         embed.add_field(
             name="Links",
             value=f"[Dotabuff](https://www.dotabuff.com/matches/{match_id}) | [OpenDota](https://www.opendota.com/matches/{match_id}) | [Stratz](https://stratz.com/matches/{match_id})",
-            inline=True,
+            inline=False,
         )
 
         # score
