@@ -110,6 +110,40 @@ def wait_backoff(failures: int):
     gevent.sleep(get_backoff(failures))
 
 
+TIMESTAMP_TIMEZONE = datetime.timezone.utc
+EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
+TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
+
+
+def utcnow() -> datetime.datetime:
+    return datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
+
+
+def generate_timestamp(dt: datetime.datetime) -> int:
+    """
+    Gets a UNIX timestamp representing a datetime.
+    """
+    delta = dt - EPOCH
+    return delta // TIMESTAMP_GRANULARITY
+
+
+def print_timestamp(timestamp: int, style: str | None = None) -> str:
+    """
+    Gets a Discord string representing a UNIX timestamp.
+    """
+    if style:
+        return f"<t:{timestamp}:{style}>"
+    return f"<t:{timestamp}>"
+
+
+def generate_datetime(timestamp: int) -> datetime.datetime:
+    """
+    Gets a datetime from UNIX timestamp.
+    """
+    delta = datetime.timedelta(seconds=timestamp)
+    return EPOCH + delta
+
+
 class TaskWrapper:
     def __init__(self, task):
         self.task = task
@@ -230,7 +264,7 @@ class DiscordUtil:
 
 class DotaAPI:
     resources = ["cluster", "lobby_type", "game_mode", "region", "xp_level"]
-    last_constants_query: datetime.datetime = datetime.datetime.min
+    last_constants_query: datetime.datetime = EPOCH
 
     @staticmethod
     async def get(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
@@ -254,7 +288,7 @@ class DotaAPI:
                 resp = await odotagh.get(url)
                 if resp.status_code != 200:
                     print("Failed to get:", resp.status_code, resp.text)
-                    DotaAPI.last_constants_query = datetime.datetime.min
+                    DotaAPI.last_constants_query = EPOCH
                     continue
                 DOTA_CACHED_CONSTANTS[res] = resp.json()
         print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
@@ -1126,40 +1160,6 @@ def update_value(
     new = update_fn(old)
     set_value(key, new, table=table_interface)
     return new
-
-
-TIMESTAMP_TIMEZONE = datetime.timezone.utc
-EPOCH = datetime.datetime(1970, 1, 1, tzinfo=TIMESTAMP_TIMEZONE)
-TIMESTAMP_GRANULARITY = datetime.timedelta(seconds=1)
-
-
-def utcnow() -> datetime.datetime:
-    return datetime.datetime.now(tz=TIMESTAMP_TIMEZONE)
-
-
-def generate_timestamp(dt: datetime.datetime) -> int:
-    """
-    Gets a UNIX timestamp representing a datetime.
-    """
-    delta = dt - EPOCH
-    return delta // TIMESTAMP_GRANULARITY
-
-
-def print_timestamp(timestamp: int, style: str | None = None) -> str:
-    """
-    Gets a Discord string representing a UNIX timestamp.
-    """
-    if style:
-        return f"<t:{timestamp}:{style}>"
-    return f"<t:{timestamp}>"
-
-
-def generate_datetime(timestamp: int) -> datetime.datetime:
-    """
-    Gets a datetime from UNIX timestamp.
-    """
-    delta = datetime.timedelta(seconds=timestamp)
-    return EPOCH + delta
 
 
 @cache
