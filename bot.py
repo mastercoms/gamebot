@@ -2018,7 +2018,7 @@ class DotaMatch(Match):
         # wait for match details to be available
         if extras and detail_wait > 0:
             await asyncio.sleep(detail_wait)
-        DotaAPI.request_parse(match_id)
+        await DotaAPI.request_parse(match_id)
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
         if extras:
