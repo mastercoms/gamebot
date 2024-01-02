@@ -291,7 +291,7 @@ class DotaAPI:
                     DotaAPI.last_constants_query = EPOCH
                     continue
                 DOTA_CACHED_CONSTANTS[res] = resp.json()
-        print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
+        # print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
 
     @staticmethod
     def get_constants() -> dict[str, dict[str, Any]]:
@@ -1924,8 +1924,13 @@ class DotaMatch(Match):
             self.account_id,
             matches_requested="1",
         )
-        if matches is None:
-            matches = await DotaAPI.get_recent_matches(self.account_id)
+        odota_matches = await DotaAPI.get_recent_matches(self.account_id)
+        if odota_matches:
+            if (
+                matches is None
+                or odota_matches[0]["match_id"] == matches[0]["match_id"]
+            ):
+                matches = odota_matches
         if matches:
             match = matches[0]
             # we've seen this match before
@@ -2010,8 +2015,12 @@ class DotaMatch(Match):
             self.polls = 0
             self.update_timestamp()
 
-        match_end_time = generate_datetime(match["start_time"] + match["duration"])
-        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (utcnow() - match_end_time)
+        match_end_time = generate_datetime(
+            match["start_time"] + match.get("duration", MATCH_POLL_INTERVAL_FIRST)
+        )
+        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
+            utcnow() - match_end_time
+        )
         detail_wait = detail_wait_time.total_seconds()
 
         # wait for match details to be available
