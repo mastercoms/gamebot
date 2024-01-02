@@ -2010,9 +2010,8 @@ class DotaMatch(Match):
             self.polls = 0
             self.update_timestamp()
 
-        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
-            utcnow() - generate_datetime(match["start_time"])
-        )
+        match_end_time = generate_datetime(match["start_time"] + match["duration"])
+        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (utcnow() - match_end_time)
         detail_wait = detail_wait_time.total_seconds()
 
         # wait for match details to be available
