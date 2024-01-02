@@ -1985,7 +1985,9 @@ class DotaMatch(Match):
         return None
 
     async def check_match(self):
-        await asyncio.sleep(self.get_poll_interval())
+        # TODO: track each interval so we can know how long to wait for match details
+        interval = self.get_poll_interval()
+        await asyncio.sleep(interval)
         match = await self.get_recent_match()
         self.polls += 1
         print_debug(f"Match: {match}")
@@ -2010,18 +2012,25 @@ class DotaMatch(Match):
         # match ID
         match_id = match["match_id"]
 
-        # reset to keep looking for games
         if extras:
+            # get how close to our 15 seconds after match end waiting time we are
+            initial_duration = match.get("duration")
+            if initial_duration is None:
+                # we're doing the expected value here because doing anything else would consistently overshoot or undershoot.
+                initial_duration = 0
+                for i in range(0, max(self.polls, MATCH_POLL_INTERVAL_COUNT - 1)):
+                    initial_duration += MATCH_POLL_INTERVALS[i]
+                left = self.polls - MATCH_POLL_INTERVAL_COUNT - 1
+                initial_duration += MATCH_POLL_INTERVAL_LAST * left
+            match_end_time = generate_datetime(match["start_time"] + initial_duration)
+            detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
+                utcnow() - match_end_time
+            )
+            detail_wait = detail_wait_time.total_seconds()
+
+            # reset to keep looking for games
             self.polls = 0
             self.update_timestamp()
-
-        match_end_time = generate_datetime(
-            match["start_time"] + match.get("duration", MATCH_POLL_INTERVAL_FIRST)
-        )
-        detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
-            utcnow() - match_end_time
-        )
-        detail_wait = detail_wait_time.total_seconds()
 
         # wait for match details to be available
         if extras and detail_wait > 0:
