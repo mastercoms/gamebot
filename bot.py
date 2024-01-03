@@ -2018,7 +2018,7 @@ class DotaMatch(Match):
             if initial_duration is None:
                 # we're doing the expected value here because doing anything else would consistently overshoot or undershoot.
                 initial_duration = 0
-                for i in range(0, max(self.polls, MATCH_POLL_INTERVAL_COUNT - 1)):
+                for i in range(0, min(self.polls, MATCH_POLL_INTERVAL_COUNT - 1)):
                     initial_duration += MATCH_POLL_INTERVALS[i]
                 left = self.polls - MATCH_POLL_INTERVAL_COUNT - 1
                 initial_duration += MATCH_POLL_INTERVAL_LAST * left
