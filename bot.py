@@ -268,7 +268,11 @@ class DotaAPI:
 
     @staticmethod
     async def get(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
-        resp = await client.opendota.get(*args, **kwargs)
+        try:
+            resp = await client.opendota.get(*args, **kwargs)
+        except Exception:
+            print("Failed to get:", traceback.format_exc())
+            return None
         if resp.status_code != 200:
             print("Failed to get:", resp.status_code, resp.text)
             return None
