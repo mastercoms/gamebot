@@ -2013,8 +2013,12 @@ class DotaMatch(Match):
         else:
             is_dire = team_num == 1
 
+        print_debug(f"is_dire: {is_dire}")
+
         # match ID
         match_id = match["match_id"]
+
+        print_debug(f"posting match_id: {match_id}")
 
         if extras:
             # get how close to our 15 seconds after match end waiting time we are
@@ -2030,15 +2034,17 @@ class DotaMatch(Match):
             detail_wait_time = datetime.timedelta(seconds=MATCH_WAIT_TIME) - (
                 utcnow() - match_end_time
             )
-            detail_wait = detail_wait_time.total_seconds()
+            detail_wait = min(MATCH_WAIT_TIME, detail_wait_time.total_seconds())
 
             # reset to keep looking for games
             self.polls = 0
             self.update_timestamp()
 
+        print_debug(f"detail_wait: {detail_wait}")
+
         # wait for match details to be available
         if extras and detail_wait > 0:
-            await asyncio.sleep(detail_wait)
+            await asyncio.sleep(MATCH_WAIT_TIME)
         await DotaAPI.request_parse(match_id)
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
@@ -2046,6 +2052,8 @@ class DotaMatch(Match):
             match_details = await DotaAPI.get_match(match_id)
         else:
             match_details = match
+
+        print_debug(f"match_details: {match_details}")
 
         won = match_details["radiant_win"] ^ is_dire
 
@@ -2157,6 +2165,8 @@ class DotaMatch(Match):
         embed.set_footer(
             text=f"Duration: {DotaMatch.get_duration(match_details['duration'])}",
         )
+
+        print_debug(f"embed: {embed}")
 
         # send
         await self.channel.send(embed=embed)
