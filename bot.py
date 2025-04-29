@@ -13,9 +13,10 @@ gevent.monkey.patch_dns()
 import asyncio
 import dataclasses
 import datetime
-import logging
+import hashlib
 import io
 import itertools
+import logging
 import math
 import os
 import random
@@ -77,6 +78,11 @@ asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 DEBUGGING = True
 
 
+def crypt_str(text: str):
+    data = text.encode("utf-8")
+    return hashlib.blake2b(data).hexdigest()
+
+
 def print_debug(*args: Any, **kwargs: Any) -> None:
     if DEBUGGING:
         print(*args, **kwargs)
@@ -91,10 +97,20 @@ def dispatch_task(coro: Coroutine):
     asyncio.run_coroutine_threadsafe(coro, client.loop)
 
 
-def get_channel(channel: discord.TextChannel | None) -> discord.TextChannel:
-    settings_channel = get_value("channel_id", table=client.settings_table)
+def get_channel(
+    channel: discord.TextChannel | None, guild: discord.Guild | None
+) -> discord.TextChannel:
+    if not channel and not guild:
+        return None
+    guild = (guild or channel.guild) if channel else guild
+    if not guild:
+        return
+    guild_handler = client.guild_handlers.get(guild.id)
+    if not guild_handler:
+        return
+    settings_channel = get_value("channel_id", table=guild_handler.settings_table)
     if settings_channel:
-        settings_channel = client.guild.get_channel(settings_channel)
+        settings_channel = guild.get_channel(settings_channel)
     return settings_channel or channel
 
 
@@ -232,7 +248,7 @@ class DiscordUtil:
             argument,
         )
         result = None
-        guild = client.guild
+        guild = message.guild
         user_id = None
 
         if match is None:
@@ -449,7 +465,7 @@ class SteamWorker:
 
         @worker.friends.on("friend_invite")
         def handle_friend_invite(user: SteamUser):
-            mutual = get_value("mutual_steam_id", table=client.settings_table)
+            mutual = MUTUAL_STEAM_ID
             should_add = True
             if mutual:
                 if not client.steamapi:
@@ -521,29 +537,8 @@ def preprocess_text(text):
     return text
 
 
-class GameClient(discord.ext.commands.Bot):
-    """The Discord client for this bot."""
-
-    steamapi: WebAPI | None
-    steamclient: SteamWorker | None
-    dotaclient: Dota2Client | None
-
+class GameGuildHandler:
     def __init__(self, *args, **kwargs):
-        """
-        Creates a new Discord client.
-        """
-        global client
-        self.opendota: httpx.AsyncClient = kwargs.pop("opendota")
-        self.http_client: httpx.AsyncClient = kwargs.pop("http_client")
-        self.debug: bool = kwargs.pop("debug", False)
-        self.no_2fa: bool = kwargs.pop("no_2fa", True)
-        client = self
-
-        super().__init__(*args, **kwargs)
-
-        self._resolver: aiohttp.AsyncResolver | None = None
-        self._connector: aiohttp.TCPConnector | None = None
-
         self.current_game: Game | None = None
         self.current_marks: dict[
             str,
@@ -552,86 +547,49 @@ class GameClient(discord.ext.commands.Bot):
         for game in GAMES:
             self.current_marks[game] = {}
         self.current_match: DotaMatch | Match | None = None
-        self.now: datetime.datetime | None = None
-
-        self.ready = False
-
-        self.play_queue: list[Path] = []
 
         self.lock: asyncio.Lock | None = None
 
-        self.guild: discord.Guild | None = None
+        self.play_queue: list[Path] = []
 
-        self.db = TinyDB(Path("./db.json"))
-        self.backup_table = self.db.table("backup")
-        self.players_table = self.db.table("players")
-        self.settings_table = self.db.table("settings")
-        self.timezone_table = self.db.table("timezone")
-        self.responses_table = TinyDB(Path("responses.db"), storage=BetterJSONStorage)
-        self.responses_cache = Path("./responses_cache")
-        self.responses_cache.mkdir(exist_ok=True)
-        steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
-        if steam_api_key is not None:
-            self.steamapi = WebAPI(key=steam_api_key)
-        else:
-            self.steamapi = None
-        steam_username = os.getenv("GAME_BOT_STEAM_USER")
-        steam_password = os.getenv("GAME_BOT_STEAM_PASS")
-        if steam_username:
-            self.steamclient = SteamWorker()
-            if self.debug:
-                self.steamclient.steam.verbose_debug = True
-            self.steamclient.login(steam_username, steam_password, self.no_2fa)
-            self.dotaclient = Dota2Client(self.steamclient.steam)
-            if self.debug:
-                self.dotaclient.verbose_debug = True
+        self.guild = kwargs["guild"]
 
-            def launch_dota():
-                self.dotaclient.launch()
+        guild_id = self.guild.id
+        guild_id_hash = crypt_str(str(guild_id))
 
-            if self.steamclient.logged_on_once:
-                launch_dota()
-            else:
-                self.steamclient.steam.once("logged_on", launch_dota)
-        else:
-            self.steamclient = None
-            self.dotaclient = None
-
-    async def setup_hook(self) -> None:
-        """
-        Sets up the async resolver and
-        """
-        await super().setup_hook()
-
-        self._resolver = aiohttp.AsyncResolver()
-        self._connector = aiohttp.TCPConnector(
-            resolver=self._resolver,
-            family=socket.AF_INET,
-            limit=0,
+        self.guild_db = TinyDB(Path(f"./db_{guild_id_hash}.json"))
+        self.backup_table = self.guild_db.table("backup")
+        self.settings_table = self.guild_db.table("settings")
+        self.server_settings = self.guild_db.table("server_settings")
+        self.keyword = get_value("keyword", table=self.server_settings) or KEYWORD
+        self.keyword_subject_suffix = "rs" if self.keyword.endswith("e") else "ers"
+        self.keyword_title = self.keyword[0].upper() + self.keyword[1:]
+        self.extra_failure_message = (
+            get_value("failure_message", table=self.server_settings)
+            or EXTRA_FAILURE_MESSAGE
         )
-        self.http.connector = self._connector
+        self.extra_win_message = (
+            get_value("win_message", table=self.server_settings) or EXTRA_WIN_MESSAGE
+        )
+        self.extra_loss_message = (
+            get_value("loss_message", table=self.server_settings) or EXTRA_LOSS_MESSAGE
+        )
+        self.server_game_data = get_value("game_data", table=self.server_settings)
 
-        self.lock = asyncio.Lock()
-
-    async def close(self) -> None:
-        """
-        Closes the client.
-        """
-        if self._resolver:
-            await self._resolver.close()
-        if self._resolver:
-            await self._connector.close()
-        if self.steamclient:
-            self.steamclient.close()
-        await super().close()
+    def get_server_game_data(self, game: str, data: str, default: Any = None) -> Any:
+        val = self.server_game_data[game].get(data, default)
+        if val is None:
+            raise ValueError(f"Server game data {data} not found for {game}.")
+        return val
 
     async def restore_backup(self):
         save = get_value("saved", table=self.backup_table)
         if not save or self.current_game or self.current_match:
             return
         try:
-            channel = self.guild.get_channel(save["channel"])
-            author = self.guild.get_member(save["author"])
+            guild = self.guild
+            channel = guild.get_channel(save["channel"])
+            author = guild.get_member(save["author"])
             game_name = save["game_name"]
             future = datetime.datetime.fromisoformat(save["future"])
             if utcnow() - future > MAX_CHECK_DELTA:
@@ -640,12 +598,11 @@ class GameClient(discord.ext.commands.Bot):
             restored_game = Game(channel, author, game_name)
             restored_game.future = future
             restored_game.group_buckets = {
-                int(k): {self.guild.get_member(m) for m in v}
+                int(k): {guild.get_member(m) for m in v}
                 for k, v in save["group_buckets"].items()
             }
             restored_game.gamer_buckets = {
-                self.guild.get_member(int(k)): v
-                for k, v in save["gamer_buckets"].items()
+                guild.get_member(int(k)): v for k, v in save["gamer_buckets"].items()
             }
             restored_game.timestamp = save["timestamp"]
             restored_game.is_checking = save["is_checking"]
@@ -655,7 +612,7 @@ class GameClient(discord.ext.commands.Bot):
             restored_game.base_mention = save["base_mention"]
             restored_game.check_delta = datetime.timedelta(seconds=save["check_delta"])
             if save["scheduled_event"]:
-                restored_game.scheduled_event = self.guild.get_scheduled_event(
+                restored_game.scheduled_event = guild.get_scheduled_event(
                     save["scheduled_event"]
                 )
             self.current_game = restored_game
@@ -669,13 +626,14 @@ class GameClient(discord.ext.commands.Bot):
         if not save or self.current_game or self.current_match:
             return
         try:
+            guild = self.guild
             timestamp = save["timestamp"]
             if generate_timestamp(utcnow()) - timestamp >= MATCH_MAX_POLL_LENGTH:
                 return
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
-            gamers = {self.guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
-            channel = self.guild.get_channel(save["channel"])
+            gamers = {guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
+            channel = guild.get_channel(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.last_match = save.get("last_match", 0)
             restored_match.polls = save["polls"]
@@ -702,18 +660,6 @@ class GameClient(discord.ext.commands.Bot):
                     DateTimeRange(datetime.datetime.fromisoformat(params[0]), end),
                     params[2],
                 )
-
-    async def on_ready(self):
-        guild = None
-        if client.guilds:
-            guild = client.guilds[0]
-        if guild is None:
-            return
-        self.guild = guild
-        self.now = utcnow()
-        await self.resume()
-        self.ready = True
-        print("Ready.")
 
     async def resume(self):
         """
@@ -804,33 +750,6 @@ class GameClient(discord.ext.commands.Bot):
             else:
                 play(cache_path)
 
-    async def on_app_command_game(self, interaction: discord.Interaction):
-        await self.handle_game_command()
-
-    async def on_app_command_voiceline(
-        self,
-        interaction: discord.Interaction,
-        voiceline: str,
-    ):
-        channel = interaction.channel
-        if not isinstance(channel, discord.TextChannel):
-            channel = get_channel(None)
-        if channel is None:
-            return
-        await self.handle_voiceline_command(interaction.user, channel, voiceline)
-
-    def is_valid_message(self, message: discord.Message) -> bool:
-        """
-        Checks if the message is valid.
-        """
-        if not self.ready:
-            return False
-        if message.author.bot:
-            return False
-        if not message.content:
-            return False
-        return True
-
     async def on_scheduled_event_user_add(
         self, event: discord.ScheduledEvent, user: discord.User
     ):
@@ -905,7 +824,7 @@ class GameClient(discord.ext.commands.Bot):
         Handles new game messages.
         """
         # if not valid, don't do anything
-        if not self.is_valid_message(message):
+        if not client.is_valid_message(message):
             return
 
         original_content = message.content
@@ -914,16 +833,17 @@ class GameClient(discord.ext.commands.Bot):
         message.content = without_mention.strip()
 
         try:
-            is_cmd = is_game_command(message.content.lower())
+            is_cmd = is_game_command(message.content.lower(), self.keyword)
             if not is_cmd and has_mention:
                 message.content = original_content.replace(
-                    f"<@{client.user.id}>", KEYWORD
+                    f"<@{client.user.id}>", self.keyword
                 ).strip()
-                is_cmd = is_game_command(message.content.lower())
+                is_cmd = is_game_command(message.content.lower(), self.keyword)
             if is_cmd:
                 async with self.lock:
                     # set our global now to when the message was made
-                    self.now = message.created_at
+                    # TODO: guild now
+                    client.now = message.created_at
 
                     # set up our arg parser
                     print_debug(message.content)
@@ -949,7 +869,8 @@ class GameClient(discord.ext.commands.Bot):
 
                     # check if it's sufficiently in the future
                     if options.future:
-                        delta = options.future - self.now
+                        # TODO: guild now
+                        delta = options.future - client.now
                         if options.start and delta <= MAX_CHECK_DELTA:
                             options.future = None
                         elif delta < MIN_CHECK_DELTA:
@@ -974,7 +895,8 @@ class GameClient(discord.ext.commands.Bot):
                             saved_marks[game] = {}
                             for marker, params in game_marks.items():
                                 dtrange, min_bucket = params
-                                if dtrange.end_datetime < self.now:
+                                # TODO: guild now
+                                if dtrange.end_datetime < client.now:
                                     old_marks[game].append(marker)
                                     continue
                                 game_intersections[game].append(dtrange)
@@ -998,7 +920,7 @@ class GameClient(discord.ext.commands.Bot):
                         for game, game_marks in old_marks.items():
                             for marker in game_marks:
                                 remove_mark(game, marker)
-                        set_value("marks", saved_marks, table=client.backup_table)
+                        set_value("marks", saved_marks, table=self.backup_table)
 
                         starting_game = False
 
@@ -1047,10 +969,11 @@ class GameClient(discord.ext.commands.Bot):
                                         gamer = min_marker
                                         # check if it's sufficiently in the future
                                         if options.future:
-                                            delta = options.future - self.now
+                                            # TODO: guild now
+                                            delta = options.future - client.now
                                             if delta <= MAX_CHECK_DELTA:
                                                 options.future = (
-                                                    self.now + MIN_SCHEDULED_DELTA
+                                                    client.now + MIN_SCHEDULED_DELTA
                                                 )
 
                         if not starting_game:
@@ -1058,16 +981,20 @@ class GameClient(discord.ext.commands.Bot):
                                 options.bucket,
                                 options.game,
                             )
-                            with_str = get_bucket_str(min_bucket)
-                            msg = f"{gamer.display_name} can {KEYWORD} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
+                            with_str = get_bucket_str(
+                                min_bucket,
+                                f"{self.keyword}{self.keyword_subject_suffix}",
+                            )
+                            msg = f"{gamer.display_name} can {self.keyword} between {print_timestamp(generate_timestamp(options.start), 't')} and {print_timestamp(generate_timestamp(options.future), 't')}{with_str}."
                             await channel.send(msg)
                             return
 
                     # are we going to start a game?
                     if not self.current_game:
+                        # TODO: guild now
                         # if didn't get a date, default to delta
                         if not options.future:
-                            options.future = self.now + MIN_CHECK_DELTA
+                            options.future = client.now + MIN_CHECK_DELTA
                         # check for game update for constants
                         await DotaAPI.query_constants()
                         print_debug("Starting game", options.future, gamer)
@@ -1077,13 +1004,13 @@ class GameClient(discord.ext.commands.Bot):
                     elif options.future:
                         if True:
                             await channel.send(
-                                f"You can't change the time of a {KEYWORD_TITLE}"
+                                f"You can't change the time of a {self.keyword_title}"
                             )
                             return
                         # if we're already checking, we can't change the time
                         if self.current_game.is_checking:
                             await channel.send(
-                                f"You can't change the time of a {KEYWORD_TITLE} Check."
+                                f"You can't change the time of a {self.keyword_title} Check."
                             )
                             return
                         # if we're not checking, we can change the time
@@ -1104,6 +1031,198 @@ class GameClient(discord.ext.commands.Bot):
             await get_channel(message.channel).send("An unexpected error occurred.")
 
 
+class GameClient(discord.ext.commands.Bot):
+    """The Discord client for this bot."""
+
+    steamapi: WebAPI | None
+    steamclient: SteamWorker | None
+    dotaclient: Dota2Client | None
+
+    def __init__(self, *args, **kwargs):
+        """
+        Creates a new Discord client.
+        """
+        global client
+        self.opendota: httpx.AsyncClient = kwargs.pop("opendota")
+        self.http_client: httpx.AsyncClient = kwargs.pop("http_client")
+        self.debug: bool = kwargs.pop("debug", False)
+        self.no_2fa: bool = kwargs.pop("no_2fa", True)
+        client = self
+
+        super().__init__(*args, **kwargs)
+
+        self._resolver: aiohttp.AsyncResolver | None = None
+        self._connector: aiohttp.TCPConnector | None = None
+
+        self.now: datetime.datetime | None = None
+
+        self.ready = False
+
+        self.guild_handlers: dict[int, GameGuildHandler] = {}
+
+        self.db = TinyDB(Path(f"./db.json"))
+        self.players_table = self.db.table("players")
+        self.timezone_table = self.db.table("timezone")
+        self.responses_table = TinyDB(Path("responses.db"), storage=BetterJSONStorage)
+        self.responses_cache = Path("./responses_cache")
+        self.responses_cache.mkdir(exist_ok=True)
+        steam_api_key = os.getenv("GAME_BOT_STEAM_KEY")
+        if steam_api_key is not None:
+            self.steamapi = WebAPI(key=steam_api_key)
+        else:
+            self.steamapi = None
+        steam_username = os.getenv("GAME_BOT_STEAM_USER")
+        steam_password = os.getenv("GAME_BOT_STEAM_PASS")
+        if steam_username:
+            self.steamclient = SteamWorker()
+            if self.debug:
+                self.steamclient.steam.verbose_debug = True
+            self.steamclient.login(steam_username, steam_password, self.no_2fa)
+            self.dotaclient = Dota2Client(self.steamclient.steam)
+            if self.debug:
+                self.dotaclient.verbose_debug = True
+
+            def launch_dota():
+                self.dotaclient.launch()
+
+            if self.steamclient.logged_on_once:
+                launch_dota()
+            else:
+                self.steamclient.steam.once("logged_on", launch_dota)
+        else:
+            self.steamclient = None
+            self.dotaclient = None
+
+    async def setup_hook(self) -> None:
+        """
+        Sets up the async resolver and
+        """
+        await super().setup_hook()
+
+        self._resolver = aiohttp.AsyncResolver()
+        self._connector = aiohttp.TCPConnector(
+            resolver=self._resolver,
+            family=socket.AF_INET,
+            limit=0,
+        )
+        self.http.connector = self._connector
+
+    async def close(self) -> None:
+        """
+        Closes the client.
+        """
+        if self._resolver:
+            await self._resolver.close()
+        if self._resolver:
+            await self._connector.close()
+        if self.steamclient:
+            self.steamclient.close()
+        await super().close()
+
+    async def on_ready(self):
+        now = utcnow()
+        for guild in self.guilds:
+            game_handler = GameGuildHandler(guild=guild)
+            game_handler.now = now
+            game_handler.lock = asyncio.Lock()
+            await game_handler.resume()
+        self.now = now
+        self.ready = True
+        print("Ready.")
+
+    async def handle_game_command(self):
+        # TODO
+        guild_handler = self.guild_handlers.get(None)
+        if not guild_handler:
+            return
+
+        guild_handler.handle_game_command()
+
+    async def handle_voiceline_command(
+        self,
+        author: discord.Member,
+        channel: discord.TextChannel,
+        content: str,
+    ):
+        guild_handler = self.guild_handlers.get(channel.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.handle_voiceline_command(author, channel, content)
+
+    async def on_app_command_game(self, interaction: discord.Interaction):
+        # TODO
+        await self.handle_game_command()
+
+    async def on_app_command_voiceline(
+        self,
+        interaction: discord.Interaction,
+        voiceline: str,
+    ):
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            channel = get_channel(None, interaction.guild)
+        if channel is None:
+            return
+        await self.handle_voiceline_command(interaction.user, channel, voiceline)
+
+    def is_valid_message(self, message: discord.Message) -> bool:
+        """
+        Checks if the message is valid.
+        """
+        if not self.ready:
+            return False
+        if message.author.bot:
+            return False
+        if not message.content:
+            return False
+        return True
+
+    async def on_scheduled_event_user_add(
+        self, event: discord.ScheduledEvent, user: discord.User
+    ):
+        guild_handler = self.guild_handlers.get(event.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.on_scheduled_event_user_add(event, user)
+
+    async def on_scheduled_event_user_remove(
+        self, event: discord.ScheduledEvent, user: discord.User
+    ):
+        guild_handler = self.guild_handlers.get(event.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.on_scheduled_event_user_remove(event, user)
+
+    async def on_scheduled_event_delete(self, event: discord.ScheduledEvent):
+        guild_handler = self.guild_handlers.get(event.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.on_scheduled_event_delete(event)
+
+    async def on_scheduled_event_update(
+        self, before: discord.ScheduledEvent, after: discord.ScheduledEvent
+    ):
+        if not before or not after:
+            return
+
+        guild_handler = self.guild_handlers.get(before.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.on_scheduled_event_update(before, after)
+
+    async def on_message(self, message: discord.Message):
+        guild_handler = self.guild_handlers.get(message.guild.id)
+        if not guild_handler:
+            return
+
+        guild_handler.on_message(message)
+
+
 client: GameClient | None = None
 
 Player = Query()
@@ -1116,7 +1235,7 @@ TableContainerType = list[TableContainerValueType] | dict[str, TableContainerVal
 TableType = TableValueType | TableContainerType
 
 
-def get_value(key: str, *, default: TableType = None, table=None) -> TableType:
+def get_value(key: str, *, default: TableType = None, table) -> TableType:
     """
     Gets from the key value DB table.
     """
@@ -1618,6 +1737,7 @@ class DotaMatch(Match):
         self.channel = channel
         self.update_timestamp()
         self.task = None
+        self.guild_handler = client.guild_handlers[channel.guild.id]
         if should_check:
             self.start_check()
 
@@ -1636,8 +1756,9 @@ class DotaMatch(Match):
             "timestamp": self.timestamp,
             "polls": self.polls,
             "channel": self.channel.id,
+            "guild": self.channel.guild.id,
         }
-        set_value("match", data, table=client.backup_table)
+        set_value("match", data, table=self.guild_handler.backup_table)
 
     def update_timestamp(self):
         self.timestamp = generate_timestamp(
@@ -1760,14 +1881,14 @@ class DotaMatch(Match):
                         adv_map = {
                             "net_worth": net_worth_adv,
                             "level": 0,
-                            "\u200B": "\u200B",
+                            "\u200b": "\u200b",
                         }
                         for key in per_player_stats[team_id]:
                             adv_map[key] = calc_pct_adv(
                                 per_player_stats[team_id][key],
                                 per_player_stats[other_team][key],
                             )
-                        adv_map["\u200B\u200B"] = "\u200B"
+                        adv_map["\u200b\u200b"] = "\u200b"
 
                 buildings = resp.get("buildings")
                 buildings_populated = False
@@ -1891,7 +2012,7 @@ class DotaMatch(Match):
                         )
                     else:
                         embed.add_field(name="Dire Towers", value="No towers destroyed")
-                    embed.add_field(name="\u200B", value="\u200B")
+                    embed.add_field(name="\u200b", value="\u200b")
                     embed.add_field(
                         name="Radiant Barracks",
                         value=f"{rax_count[2]} destroyed",
@@ -1900,7 +2021,7 @@ class DotaMatch(Match):
                         name="Dire Barracks",
                         value=f"{rax_count[3]} destroyed",
                     )
-                    embed.add_field(name="\u200B", value="\u200B")
+                    embed.add_field(name="\u200b", value="\u200b")
 
                 embed.set_footer(text=f"{duration_title}: {duration}")
 
@@ -2001,8 +2122,8 @@ class DotaMatch(Match):
             self.save()
             self.start_check()
         else:
-            client.current_match = None
-            del_value("match", table=client.backup_table)
+            self.guild_handler.current_match = None
+            del_value("match", table=self.guild_handler.backup_table)
             print_debug("Current match ended")
 
     async def post_match(self, match, extras=False):
@@ -2172,10 +2293,10 @@ class DotaMatch(Match):
         await self.channel.send(embed=embed)
         if extras:
             if won:
-                if EXTRA_WIN_MESSAGE:
-                    await self.channel.send(EXTRA_WIN_MESSAGE)
-            elif EXTRA_LOSS_MESSAGE:
-                await self.channel.send(EXTRA_LOSS_MESSAGE)
+                if self.guild_handler.extra_win_message:
+                    await self.channel.send(self.guild_handler.extra_win_message)
+            elif self.guild_handler.extra_loss_message:
+                await self.channel.send(self.guild_handler.extra_loss_message)
 
 
 def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
@@ -2188,12 +2309,8 @@ def get_bucket_bounds(min_bucket: int, game_name: str) -> tuple[int, int]:
     return min_bucket, game_max
 
 
-def get_bucket_str(min_bucket: int) -> str:
-    return (
-        f" with {min_bucket} {KEYWORD}{KEYWORD_SUBJECT_SUFFIX}"
-        if min_bucket > BUCKET_MIN
-        else ""
-    )
+def get_bucket_str(min_bucket: int, keyworders: str) -> str:
+    return f" with {min_bucket} {keyworders}" if min_bucket > BUCKET_MIN else ""
 
 
 class Game:
@@ -2246,6 +2363,8 @@ class Game:
 
         self.cancellable = False
 
+        self.guild_handler = client.guild_handlers[channel.guild.id]
+
     def save(self):
         """
         Saves the Game to disk, so that it may be resumed in case of a crash/update/restart.
@@ -2268,15 +2387,15 @@ class Game:
             "was_scheduled": self.was_scheduled,
             "base_mention": self.base_mention,
             "check_delta": self.check_delta.total_seconds(),
-            "scheduled_event": self.scheduled_event.id
-            if self.scheduled_event
-            else None,
+            "scheduled_event": (
+                self.scheduled_event.id if self.scheduled_event else None
+            ),
         }
-        set_value("saved", data, table=client.backup_table)
+        set_value("saved", data, table=self.guild_handler.backup_table)
 
     def clear_backup(self):
         print_debug("Deleting backup table")
-        del_value("saved", table=client.backup_table)
+        del_value("saved", table=self.guild_handler.backup_table)
         self.cancellable = False
 
     def reset(self):
@@ -2308,10 +2427,11 @@ class Game:
     async def add_initials(self, author: discord.Member, bucket: int):
         await self.add_gamer(author, bucket, skip_exist=True)
         if not self.is_checking:
-            game_marks = client.current_marks[self.game_name]
+            game_marks = self.guild_handler.current_marks[self.game_name]
             old_marks = []
             for gamer, params in game_marks.items():
                 dtrange, min_bucket = params
+                # TODO: guild now
                 if dtrange.end_datetime < client.now:
                     old_marks.append(gamer)
                 elif self.future in dtrange:
@@ -2357,27 +2477,31 @@ class Game:
         print_debug("Initialized game")
         if self.base_mention is None:
             self.base_mention = (
-                f"<@&{get_game_data(self.game_name, 'role')}>"
+                f"<@&{self.guild_handler.get_server_game_data(self.game_name, 'role')}>"
                 if mention is None
                 else mention
             )
         name = self.author.display_name
         relative_time = print_timestamp(self.timestamp, "R")
         if self.is_checking:
-            msg = f"{self.base_mention} {name} requested a {KEYWORD_TITLE} Check. (expires {relative_time})"
+            msg = f"{self.base_mention} {name} requested a {self.guild_handler.keyword_title} Check. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
             game_display = get_game_data(self.game_name, "display", self.game_name)
             self.scheduled_event = await guild.create_scheduled_event(
-                name=f"{game_display} {KEYWORD_TITLE}",
+                name=f"{game_display} {self.guild_handler.keyword_title}",
                 start_time=self.future,
-                channel=guild.get_channel(get_game_data(self.game_name, "voice", None)),
+                channel=guild.get_channel(
+                    self.guild_handler.get_server_game_data(
+                        self.game_name, "voice", None
+                    )
+                ),
                 privacy_level=discord.PrivacyLevel.guild_only,
                 entity_type=discord.EntityType.voice,
-                reason=f"Starting {KEYWORD} for {name}",
+                reason=f"Starting {self.guild_handler.keyword} for {name}",
             )
-            msg = f"{self.base_mention} {name} scheduled a {KEYWORD} at {short_time} ({relative_time})."
+            msg = f"{self.base_mention} {name} scheduled a {self.guild_handler.keyword} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
         else:
@@ -2388,6 +2512,7 @@ class Game:
         """
         Gets the timedelta until the game finishes.
         """
+        # TODO: guild now
         return self.future - client.now
 
     def get_delta_seconds(self) -> float:
@@ -2434,7 +2559,7 @@ class Game:
             size = len(self.gamer_buckets)
             if size >= cap:
                 await self.channel.send(
-                    f"{KEYWORD} is full. {gamer.display_name} cannot join."
+                    f"{self.guild_handler.keyword} is full. {gamer.display_name} cannot join."
                 )
                 return
 
@@ -2447,12 +2572,16 @@ class Game:
             name = gamer.display_name
             size_c = len(self.gamer_buckets)
             size = f"**({size_c}/{max_bucket})**"
-            with_str = get_bucket_str(min_bucket)
+            with_str = get_bucket_str(
+                min_bucket, f"{self.keyword}{self.keyword_subject_suffix}"
+            )
             if self.is_checking:
                 # we're adding a gamer to overfill
                 if size_c > max_bucket:
                     with_str += " (overfill)"
-                msg = f"{name} is ready to {KEYWORD}{with_str}. {size}"
+                msg = (
+                    f"{name} is ready to {self.guild_handler.keyword}{with_str}. {size}"
+                )
                 countdown = self.get_delta_seconds()
                 if 5 < countdown < MIN_CHECK_COUNTDOWN:
                     print_debug("Refreshing countdown from add_gamer")
@@ -2464,7 +2593,7 @@ class Game:
                 print_debug("Adding gamer")
                 short_time = print_timestamp(self.timestamp, "t")
                 relative_time = print_timestamp(self.timestamp, "R")
-                msg = f"{name} can {KEYWORD} at {short_time} ({relative_time}){with_str}. {size}"
+                msg = f"{name} can {self.guild_handler.keyword} at {short_time} ({relative_time}){with_str}. {size}"
             await self.channel.send(msg)
         else:
             self.has_initial = True
@@ -2489,7 +2618,9 @@ class Game:
             self.group_buckets[bucket].remove(gamer)
 
         if notify:
-            await self.channel.send(f"{gamer.display_name} left the {KEYWORD}.")
+            await self.channel.send(
+                f"{gamer.display_name} left the {self.guild_handler.keyword}."
+            )
 
         self.save()
 
@@ -2539,19 +2670,19 @@ class Game:
                 # finish the game
                 max_gamers = get_game_data(self.game_name, "max", game_min)
                 await self.channel.send(
-                    f"{mention} {KEYWORD_TITLE} Check complete. **{num_gamers}/{max_gamers}** players ready to {KEYWORD}.",
+                    f"{mention} {self.guild_handler.keyword_title} Check complete. **{num_gamers}/{max_gamers}** players ready to {self.guild_handler.keyword}.",
                 )
                 # we had a game
-                set_value("no_gamers_consecutive", 0)
+                set_value("no_gamers_consecutive", 0, table=self.guild_handler.guild_db)
                 # track dota matches
-                if self.game_name == "dota" and not client.current_match:
+                if self.game_name == "dota" and not self.guild_handler.current_match:
                     account_ids = set()
                     for gamer in gamers:
                         player = client.players_table.get(Player.id == gamer.id)
                         if player:
                             account_ids.add(player["steam"])
                     if account_ids:
-                        client.current_match = DotaMatch(
+                        self.guild_handler.current_match = DotaMatch(
                             account_ids=account_ids,
                             gamers=gamers,
                             channel=self.channel,
@@ -2560,14 +2691,15 @@ class Game:
                 if not has_enough:
                     # only do a last call if it was a long term scheduling
                     if self.check_delta > MAX_CHECK_DELTA and get_value(
-                        "is_last_call_enabled", table=client.settings_table
+                        "is_last_call_enabled", table=self.guild_handler.settings_table
                     ):
                         mention = self.base_mention
-                        mention += f" No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} scheduled for the {KEYWORD}. Last call!"
+                        mention += f" No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} scheduled for the {self.guild_handler.keyword}. Last call!"
                     else:
                         success = False
                 if success:
                     print_debug("Starting check")
+                    # TODO: guild now
                     # start the game up again
                     client.now = (
                         self.future
@@ -2580,20 +2712,23 @@ class Game:
         if not success:
             self.cancellable = False
             print_debug("No gamers")
-            no_gamers = update_value(increment, "no_gamers", default=0)
+            no_gamers = update_value(
+                increment, "no_gamers", default=0, table=self.guild_handler.guild_db
+            )
             no_gamers_consecutive = update_value(
                 increment,
                 "no_gamers_consecutive",
                 default=0,
+                table=self.guild_handler.guild_db,
             )
             await self.channel.send(
-                f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found for the {KEYWORD}. This server has gone {no_gamers} {KEYWORD}s without a {KEYWORD}. ({no_gamers_consecutive} in a row).",
+                f"No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} found for the {self.guild_handler.keyword}. This server has gone {no_gamers} {self.guild_handler.keyword}s without a {self.guild_handler.keyword}. ({no_gamers_consecutive} in a row).",
             )
-            if EXTRA_FAILURE_MESSAGE:
-                await self.channel.send(EXTRA_FAILURE_MESSAGE)
+            if self.guild_handler.extra_failure_message:
+                await self.channel.send(self.guild_handler.extra_failure_message)
             if self.scheduled_event:
                 await self.scheduled_event.cancel(
-                    reason=f"No {KEYWORD}{KEYWORD_SUBJECT_SUFFIX} found, cancelling the {KEYWORD}"
+                    reason=f"No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} found, cancelling the {self.guild_handler.keyword}"
                 )
         if self.is_checking:
             # make it past tense
@@ -2608,7 +2743,7 @@ class Game:
             print("Failed to finish match", traceback.format_exc())
         finally:
             if should_end:
-                client.current_game = None
+                self.guild_handler.current_game = None
                 self.clear_backup()
 
     def cancel_task(self, reason: str = "Cancelled"):
@@ -2643,10 +2778,12 @@ class Game:
             await self.update_timestamp(now)
             await self.replace_message("expires", "cancelled")
         if self.scheduled_event:
-            await self.scheduled_event.cancel(reason=f"Cancelling {KEYWORD}")
-        client.current_game = None
+            await self.scheduled_event.cancel(
+                reason=f"Cancelling {self.guild_handler.keyword}"
+            )
+        self.guild_handler.current_game = None
         self.clear_backup()
-        await self.channel.send(f"{KEYWORD_TITLE} cancelled.")
+        await self.channel.send(f"{self.guild_handler.keyword_title} cancelled.")
 
     async def advance(self, now: datetime.datetime):
         """
@@ -2788,6 +2925,7 @@ def process_in(args: list[str]) -> datetime.datetime | None:
     if args[0] == "now":
         args.pop(0)
         return utcnow()
+    # TODO: guild now
     arw = arrow.get(client.now)
     date_string = "in"
     end = 0
@@ -2895,7 +3033,11 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
         the_timezone = ZoneInfo(the_timezone)
     if not the_timezone:
         the_timezone = LOCAL_TZINFO
-    local_now = client.now.astimezone(the_timezone)
+    # TODO: guild now
+    # guild_handler = client.guild_handlers[gamer.guild.id]
+    # client_now = guild_handler.now
+    client_now = client.now
+    local_now = client_now.astimezone(the_timezone)
     # go through until we get a date
     while True:
         arg = args[end]
@@ -2968,7 +3110,7 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
         if is_tz_str:
             new_timezone = ZoneInfo(word)
             if new_timezone != the_timezone:
-                new_now = client.now.astimezone(the_timezone)
+                new_now = client_now.astimezone(the_timezone)
                 new_timezone_am = new_now.hour < 12
                 local_timezone_am = local_now.hour < 12
                 if new_timezone_am != local_timezone_am:
@@ -2988,15 +3130,15 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
             # if UTC time is in the next day, we need to act like we're getting a time in the past
             # because our local time zone is in the previous day, likewise with future
             if (
-                client.now.day > local_now.day
-                or client.now.month > local_now.month
-                or client.now.year > local_now.year
+                client_now.day > local_now.day
+                or client_now.month > local_now.month
+                or client_now.year > local_now.year
             ):
                 settings["PREFER_DATES_FROM"] = "past"
             elif (
-                client.now.day < local_now.day
-                or client.now.month < local_now.month
-                or client.now.year < local_now.year
+                client_now.day < local_now.day
+                or client_now.month < local_now.month
+                or client_now.year < local_now.year
             ):
                 settings["PREFER_DATES_FROM"] = "future"
         else:
@@ -3022,11 +3164,11 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     if confirmed_date and confirmed_date.tzinfo is None:
         confirmed_date = confirmed_date.replace(tzinfo=TIMESTAMP_TIMEZONE)
     # if we got it wrong, advance from AM -> PM (or PM -> AM)
-    if confirmed_date and client.now > confirmed_date:
+    if confirmed_date and client_now > confirmed_date:
         confirmed_date += NEXT_PERIOD
         # if we got it wrong again, advance from AM -> PM (or PM -> AM)
         # this happens for "today's am" when you're currently in "today's pm" and want "tomorrow's am".
-        if confirmed_date and client.now > confirmed_date:
+        if confirmed_date and client_now > confirmed_date:
             confirmed_date += NEXT_PERIOD
     return confirmed_date
 
@@ -3084,13 +3226,14 @@ START_GAME_ARGS = {"at", "in", "on"}
 
 
 def remove_mark(game: str, gamer: discord.Member):
-    if client.current_marks[game].pop(gamer, None):
+    guild_handler = client.guild_handlers[gamer.guild.id]
+    if guild_handler.current_marks[game].pop(gamer, None):
 
         def clean_mark(old):
             old[game].pop(str(gamer.id), None)
             return old
 
-        update_value(clean_mark, "marks", table=client.backup_table)
+        update_value(clean_mark, "marks", table=guild_handler.backup_table)
 
 
 async def consume_args(
@@ -3108,37 +3251,39 @@ async def consume_args(
     control = args.pop(0).lower()
     created_at = message.created_at
     channel = get_channel(message.channel)
+    guild_handler = client.guild_handlers[message.guild.id]
+    keyword = guild_handler.keyword
     # if there's a game, try to control it
-    if client.current_game:
+    if guild_handler.current_game:
         # sometimes users accidentally try to start a game when it's running
         if control in START_GAME_ARGS:
             await channel.send(
-                f"Cannot start a {KEYWORD} when there is already one currently active.",
+                f"Cannot start a {keyword} when there is already one currently active.",
             )
             return None
         if control == "but":
-            await client.current_game.cancel(created_at)
+            await guild_handler.current_game.cancel(created_at)
             return options
         if control == "cancel":
-            await client.current_game.cancel(created_at)
+            await guild_handler.current_game.cancel(created_at)
             return None
         if control == "now":
-            await client.current_game.advance(created_at)
+            await guild_handler.current_game.advance(created_at)
             return None
         if control == "leave":
-            await client.current_game.remove_gamer(gamer)
+            await guild_handler.current_game.remove_gamer(gamer)
             return None
     else:
         # sometimes users accidentally try to control a game when it doesn't exist
         if control in CURRENT_GAME_ARGS:
             await channel.send(
-                f"Cannot control a {KEYWORD} when there is none currently active.",
+                f"Cannot control a {keyword} when there is none currently active.",
             )
             return None
         if control == "for":
             if not args:
                 await channel.send(
-                    f"{KEYWORD} for <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {KEYWORD} for {GAMES[0]}",
+                    f"{keyword} for <game>\nSet the name of the game to schedule.\n**Available Games:** {', '.join(GAMES)}\n\n**Example:** {keyword} for {GAMES[0]}",
                 )
                 return None
             game = args.pop(0).lower()
@@ -3151,7 +3296,7 @@ async def consume_args(
         if control == "at":
             if not args:
                 await channel.send(
-                    f"{KEYWORD} at <time>\nSet a specific date/time to check at.\n\n**Example:** {KEYWORD} at 5pm",
+                    f"{keyword} at <time>\nSet a specific date/time to check at.\n\n**Example:** {keyword} at 5pm",
                 )
                 return None
             confirmed_date, _time_control = process_time_control(control, args, gamer)
@@ -3161,7 +3306,7 @@ async def consume_args(
         if control == "in":
             if not args:
                 await channel.send(
-                    f"{KEYWORD} in <time>\nSet a length of time to check at.\n\n**Example:** {KEYWORD} in 10 minutes",
+                    f"{keyword} in <time>\nSet a length of time to check at.\n\n**Example:** {keyword} in 10 minutes",
                 )
                 return None
             confirmed_date, _time_control = process_time_control(control, args, gamer)
@@ -3171,7 +3316,7 @@ async def consume_args(
     if control == "match":
         if not args:
             await channel.send(
-                f"{KEYWORD} match <match id>\nSet the match ID to query.\n\n**Example:** {KEYWORD} match 7208943764"
+                f"{keyword} match <match id>\nSet the match ID to query.\n\n**Example:** {keyword} match 7208943764"
             )
             return None
         match_id = args.pop(0)
@@ -3185,7 +3330,7 @@ async def consume_args(
     if control == "register":
         if not args:
             await channel.send(
-                f"{KEYWORD} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {KEYWORD} register username\n**Example:** {KEYWORD} register https://steamcommunity.com/id/username\n**Example:** {KEYWORD} register https://steamcommunity.com/profiles/12345678901234567",
+                f"{keyword} register <steam profile>\nRegisters your Steam account for game tracking.\n\n**Example:** {keyword} register username\n**Example:** {keyword} register https://steamcommunity.com/id/username\n**Example:** {keyword} register https://steamcommunity.com/profiles/12345678901234567",
             )
             return None
         id_arg = args.pop(0)
@@ -3260,7 +3405,7 @@ async def consume_args(
                 )
                 return None
         await channel.send(
-            f"{KEYWORD} timezone <timezone>|reset\nSets your timezone preference for `{KEYWORD} at`.\n\n**Example:** {KEYWORD} timezone US/Eastern\n**Example:** {KEYWORD} timezone EST",
+            f"{keyword} timezone <timezone>|reset\nSets your timezone preference for `{keyword} at`.\n\n**Example:** {keyword} timezone US/Eastern\n**Example:** {keyword} timezone EST",
         )
         return None
     if control == "option":
@@ -3269,7 +3414,7 @@ async def consume_args(
             return None
         if not args:
             await channel.send(
-                f"{KEYWORD} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {KEYWORD} option set channel_id 123456789",
+                f"{keyword} option <set|get> <option> [value]\nSets/gets an option.\n\n**Example:** {keyword} option set channel_id 123456789",
             )
             return None
         option_mode = args.pop(0).lower()
@@ -3285,21 +3430,21 @@ async def consume_args(
                 elif "is" in option:
                     new_value = new_value.lower() in ("true", "1", "yes", "on")
 
-                set_value(option, new_value, table=client.settings_table)
+                set_value(option, new_value, table=guild_handler.settings_table)
                 await channel.send(f"{option}={new_value}")
             else:
-                del_value(option, table=client.settings_table)
+                del_value(option, table=guild_handler.settings_table)
                 await channel.send(f"{option}=null")
         else:
             await channel.send(
-                f"{option}={get_value(option, table=client.settings_table)}",
+                f"{option}={get_value(option, table=guild_handler.settings_table)}",
             )
         return None
     # if buckets
     if control == "if":
         if not args:
             await channel.send(
-                f"{KEYWORD} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {KEYWORD} if 3",
+                f"{keyword} if <number>\nSet a minimum number of players you'd like to play with. You can say this again to change it.\n\n**Example:** {keyword} if 3",
             )
             return None
         options.bucket = get_int(args.pop(0), BUCKET_MIN)
@@ -3339,7 +3484,7 @@ async def consume_args(
                     options.future = end_datetime
                     return options
         await channel.send(
-            f"{KEYWORD} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\ndank mark remove|rm\nRemoves any marked availability.\n\n**Example:** {KEYWORD} mark in 1 hour to 2 hours\n**Example:** {KEYWORD} mark 3pm to 6pm",
+            f"{keyword} mark [in/at] <time> to [in/at] <time>\nMarks yourself as available for a scheduled game at a given time.\ndank mark remove|rm\nRemoves any marked availability.\n\n**Example:** {keyword} mark in 1 hour to 2 hours\n**Example:** {keyword} mark 3pm to 6pm",
         )
         return None
 
@@ -3353,7 +3498,7 @@ async def consume_args(
         if handled == 0:
             await channel.send("Already querying a match, please try again later.")
             return None
-        match = client.current_match
+        match = guild_handler.current_match
         member = None
         if args:
             match = None
@@ -3378,7 +3523,7 @@ async def consume_args(
                 return None
         elif not match:
             await channel.send(
-                f"There is no active {KEYWORD}. Please specify a player.\n\n{KEYWORD} status <Discord user>\n\n**Example:** {KEYWORD} status Nickname\n**Example:** {KEYWORD} status @Name"
+                f"There is no active {keyword}. Please specify a player.\n\n{keyword} status <Discord user>\n\n**Example:** {keyword} status Nickname\n**Example:** {keyword} status @Name"
             )
             return None
         if not member:
@@ -3395,7 +3540,7 @@ async def consume_args(
         return None
 
     # if we didn't find the control, it's an invalid command
-    arguments = KEYWORD + " " + control
+    arguments = keyword + " " + control
     if args:
         arguments += " " + " ".join(args)
     await channel.send(
@@ -3417,7 +3562,7 @@ def get_game_data(game: str, data: str, default: Any = None) -> Any:
     return val
 
 
-def is_game_command(content: str) -> bool:
+def is_game_command(content: str, keyword: str) -> bool:
     """
     Checks if the message represents a game "command"
     """
@@ -3426,13 +3571,13 @@ def is_game_command(content: str) -> bool:
         return False
     # if it is the word, passes
     word = content.split(maxsplit=1)[0]
-    if word.startswith(KEYWORD):
+    if word.startswith(keyword):
         return True
     # has to start with the letter
-    if not word.startswith(KEYWORD[0]):
+    if not word.startswith(keyword[0]):
         return False
     # fuzz it
-    ratio = fuzz.ratio(word, KEYWORD)
+    ratio = fuzz.ratio(word, keyword)
     return ratio > FUZZ_THRESHOLD
 
 
@@ -3504,12 +3649,12 @@ with open("settings.json", "rb") as f:
     LOCAL_TZINFO = ZoneInfo(LOCAL_TIMEZONE)
 
     KEYWORD = config.get("keyword", "game")
-    KEYWORD_SUBJECT_SUFFIX = "rs" if KEYWORD.endswith("e") else "ers"
-    KEYWORD_TITLE = KEYWORD[0].upper() + KEYWORD[1:]
 
     EXTRA_FAILURE_MESSAGE = config.get("failure_message", None)
     EXTRA_WIN_MESSAGE = config.get("win_message", None)
     EXTRA_LOSS_MESSAGE = config.get("loss_message", None)
+
+    MUTUAL_STEAM_ID = config.get("mutual_steam_id", None)
 
     GAME_DATA = config["games"]
     GAMES = list(GAME_DATA.keys())

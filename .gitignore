@@ -1,8 +1,9 @@
 /.idea/
-/db.json
+/db*.json
 /settings.json
 /*.bin
 /cm_servers.json
 /responses_cache
 /.ruff_cache
 /.vscode
+/misc/
