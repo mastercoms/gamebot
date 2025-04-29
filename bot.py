@@ -98,8 +98,8 @@ def dispatch_task(coro: Coroutine):
 
 
 def get_channel(
-    channel: discord.TextChannel | None, guild: discord.Guild | None
-) -> discord.TextChannel:
+    channel: discord.TextChannel | discord.Thread | None, guild: discord.Guild | None
+) -> discord.TextChannel | discord.Thread:
     if not channel and not guild:
         return None
     guild = (guild or channel.guild) if channel else guild
@@ -552,7 +552,7 @@ class GameGuildHandler:
 
         self.play_queue: list[Path] = []
 
-        self.guild = kwargs["guild"]
+        self.guild: discord.Guild = kwargs["guild"]
 
         guild_id = self.guild.id
         guild_id_hash = crypt_str(str(guild_id))
@@ -675,7 +675,7 @@ class GameGuildHandler:
     async def handle_voiceline_command(
         self,
         author: discord.Member,
-        channel: discord.TextChannel,
+        channel: discord.TextChannel | discord.Thread,
         content: str,
     ):
         # if in voice
@@ -827,6 +827,14 @@ class GameGuildHandler:
         if not client.is_valid_message(message):
             return
 
+        msg_channel = message.thread or message.channel
+
+        if get_value(
+            "require_channel", False, table=self.guild_handler.server_settings
+        ):
+            if msg_channel.id != get_channel(msg_channel):
+                return
+
         original_content = message.content
         without_mention = message.content.replace(f"<@{client.user.id}>", "")
         has_mention = without_mention != message.content
@@ -852,7 +860,7 @@ class GameGuildHandler:
                     arg_str = " ".join(args)
                     gamer = message.author
                     options = GameOptions()
-                    channel = get_channel(message.channel)
+                    channel = get_channel(channel)
 
                     # consume all args
                     while args:
@@ -1023,12 +1031,12 @@ class GameGuildHandler:
             else:
                 await self.handle_voiceline_command(
                     message.author,
-                    message.channel,
+                    msg_channel,
                     message.content,
                 )
         except Exception:
             print("Unexpected error:", traceback.format_exc())
-            await get_channel(message.channel).send("An unexpected error occurred.")
+            await get_channel(msg_channel).send("An unexpected error occurred.")
 
 
 class GameClient(discord.ext.commands.Bot):
@@ -1697,7 +1705,7 @@ class DotaMatch(Match):
     party_size: int
     timestamp: int
     polls: int
-    channel: discord.TextChannel
+    channel: discord.TextChannel | discord.Thread
     serialize: bool
     task: TaskWrapper | None
 
@@ -1705,7 +1713,7 @@ class DotaMatch(Match):
         self,
         account_ids: set[int],
         gamers: set[discord.Member],
-        channel: discord.TextChannel,
+        channel: discord.TextChannel | discord.Thread,
         should_check: bool = True,
         serialize: bool = True,
     ):
@@ -2325,7 +2333,7 @@ class Game:
     timestamp: int
     is_checking: bool
     author: discord.Member
-    channel: discord.TextChannel
+    channel: discord.TextChannel | discord.Thread
     game_name: str
     message: discord.Message | None
     task: TaskWrapper | None
@@ -2338,7 +2346,7 @@ class Game:
 
     def __init__(
         self,
-        channel: discord.TextChannel,
+        channel: discord.TextChannel | discord.Thread,
         author: discord.Member,
         game_name: str,
     ):
@@ -3254,7 +3262,7 @@ async def consume_args(
     """
     control = args.pop(0).lower()
     created_at = message.created_at
-    channel = get_channel(message.channel)
+    channel = get_channel(message.thread or message.channel)
     guild_handler = client.guild_handlers[message.guild.id]
     keyword = guild_handler.keyword
     # if there's a game, try to control it
