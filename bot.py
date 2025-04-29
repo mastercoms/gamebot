@@ -1134,7 +1134,7 @@ class GameClient(discord.ext.commands.Bot):
             game_handler.now = now
             game_handler.lock = asyncio.Lock()
             await game_handler.resume()
-            self.game_handlers[guild.id] = game_handler
+            self.guild_handlers[guild.id] = game_handler
         self.now = now
         self.ready = True
         print("Ready.")
