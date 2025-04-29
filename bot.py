@@ -1708,6 +1708,7 @@ class DotaMatch(Match):
     channel: discord.TextChannel | discord.Thread
     serialize: bool
     task: TaskWrapper | None
+    guild_handler: GameGuildHandler
 
     def __init__(
         self,
@@ -1719,6 +1720,7 @@ class DotaMatch(Match):
     ):
         self.serialize = serialize
         self.account_ids = account_ids
+        self.guild_handler = client.guild_handlers[channel.guild.id]
         if self.account_ids:
             raw_friend_ids = [
                 try_steam_id(account_id) for account_id in list(account_ids)
