@@ -3507,7 +3507,7 @@ In any case, anyone can say:
                     new_value = get_int(new_value, default=None)
                     if new_value is None:
                         new_value = tmp
-                elif "is" in option:
+                elif "is" in option or "should" in option:
                     new_value = new_value.lower() in ("true", "1", "yes", "on")
 
                 set_value(option, new_value, table=guild_handler.settings_table)

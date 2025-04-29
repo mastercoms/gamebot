@@ -53,7 +53,7 @@ In any case, anyone can say:
 {
   "games": {
     "dota": {
-      "role": 123456789123456789
+      "display": "Dota 2"
     }
   }
 }
@@ -78,12 +78,13 @@ In any case, anyone can say:
   // an extra message to send when you lose a match
   // perhaps a video or gif of extreme agony and frustration
   "loss_message": "",
+  // Steam bot will filter auto-accepting friend requests to only users who have this Steam 64 ID added
+  "mutual_steam_id": 76999999999999999,
   // the list of available games, required
   // first one is default, others can be specified with "game for"
   "games": {
     "dota": {
-      // the ID for the role you want to ping for this game
-      "role": 123456789123456789,
+      "display": "Dota 2",
       // the minimum number of players required to play the game, defaults to 2
       "min": 2,
       // the maximum number of players that can play together
@@ -91,15 +92,47 @@ In any case, anyone can say:
       // so that they are only included if there are enough players
       // defaults to equal to min, not allowing this functionality
       "max": 5,
+      "overfill": 1,
+      "slots": [
+        {
+          "name": "Safe Lane",
+          "num": 1
+        },
+        {
+          "name": "Mid Lane",
+          "num": 1
+        },
+        {
+          "name": "Off Lane",
+          "num": 1
+        },
+        {
+          "name": "Soft Support",
+          "num": 1
+        },
+        {
+          "name": "Hard Support",
+          "num": 1
+        },
+        {
+          "name": "Coach",
+          "num": 1,
+          "overfill": true
+        }
+      ]
     },
     "apex": {
-      role: 123456789123456790,
+      "display": "Apex",
+      "max": 3
+    },
+    "fortnite": {
+      "display": "Fortnite",
+      "max": 4
     },
   }
 }
 ```
 
-### options
+### per-server options
 
 * `channel_id`: forces all bot responses to this channel
-* `mutual_steam_id`: Steam bot will filter auto-accepting friend requests to only users who have this Steam 64 ID added
