@@ -98,16 +98,17 @@ def dispatch_task(coro: Coroutine):
 
 
 def get_channel(
-    channel: discord.TextChannel | discord.Thread | None, guild: discord.Guild | None
+    channel: discord.TextChannel | discord.Thread | None,
+    guild: discord.Guild | None = None,
 ) -> discord.TextChannel | discord.Thread:
     if not channel and not guild:
         return None
     guild = (guild or channel.guild) if channel else guild
     if not guild:
-        return
+        return None
     guild_handler = client.guild_handlers.get(guild.id)
     if not guild_handler:
-        return
+        return None
     settings_channel = get_value("channel_id", table=guild_handler.settings_table)
     if settings_channel:
         settings_channel = guild.get_channel_or_thread(settings_channel)
