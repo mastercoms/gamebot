@@ -1242,7 +1242,7 @@ TableContainerType = list[TableContainerValueType] | dict[str, TableContainerVal
 TableType = TableValueType | TableContainerType
 
 
-def get_value(key: str, *, default: TableType = None, table) -> TableType:
+def get_value(key: str, *, default: TableType = None, table=None) -> TableType:
     """
     Gets from the key value DB table.
     """
