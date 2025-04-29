@@ -829,7 +829,7 @@ class GameGuildHandler:
 
         msg_channel = message.thread or message.channel
 
-        if get_value("require_channel", False, table=self.server_settings):
+        if get_value("require_channel", default=False, table=self.server_settings):
             if msg_channel.id != get_channel(msg_channel):
                 return
 
@@ -2497,7 +2497,7 @@ class Game:
             guild = self.channel.guild
             game_display = get_game_data(self.game_name, "display", self.game_name)
             if not get_value(
-                "skip_events", False, table=self.guild_handler.server_settings
+                "skip_events", default=False, table=self.guild_handler.server_settings
             ):
                 self.scheduled_event = await guild.create_scheduled_event(
                     name=f"{game_display} {self.guild_handler.keyword_title}",
