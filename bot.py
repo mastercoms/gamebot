@@ -75,7 +75,7 @@ else:
 
 asyncio.set_event_loop_policy(asyncio_gevent.EventLoopPolicy())
 
-DEBUGGING = True
+DEBUGGING = int(os.environ.get("GAME_BOT_DEBUG", 0))
 
 
 def crypt_str(text: str):
@@ -84,7 +84,7 @@ def crypt_str(text: str):
 
 
 def print_debug(*args: Any, **kwargs: Any) -> None:
-    if DEBUGGING:
+    if DEBUGGING > 0:
         print(*args, **kwargs)
 
 
@@ -3678,7 +3678,8 @@ def start_bot(*, debug: bool, no_2fa: bool) -> None:
     asyncio.run(main(debug, no_2fa))
 
 
-PROFILING = False
+PROFILING = os.environ.get("GAME_BOT_PROFILING", False)
+USE_2FA = os.environ.get("GAME_BOT_2FA", False)
 
 if __name__ == "__main__":
     # TODO: arg parse
@@ -3688,9 +3689,12 @@ if __name__ == "__main__":
         yappi.set_context_backend("greenlet")
         yappi.set_clock_type("cpu")
         yappi.start(builtins=True)
+
+    no_2fa = not USE_2FA
+
     if PROFILING:
         with yappi.run():
-            start_bot(debug=False, no_2fa=True)
+            start_bot(debug=DEBUGGING > 1, no_2fa=no_2fa)
         yappi.get_func_stats().print_all()
     else:
-        start_bot(debug=False, no_2fa=True)
+        start_bot(debug=DEBUGGING > 1, no_2fa=no_2fa)
