@@ -110,7 +110,7 @@ def get_channel(
         return
     settings_channel = get_value("channel_id", table=guild_handler.settings_table)
     if settings_channel:
-        settings_channel = guild.get_channel(settings_channel)
+        settings_channel = guild.get_channel_or_thread(settings_channel)
     return settings_channel or channel
 
 
@@ -588,7 +588,7 @@ class GameGuildHandler:
             return
         try:
             guild = self.guild
-            channel = guild.get_channel(save["channel"])
+            channel = guild.get_channel_or_thread(save["channel"])
             author = guild.get_member(save["author"])
             game_name = save["game_name"]
             future = datetime.datetime.fromisoformat(save["future"])
@@ -633,7 +633,7 @@ class GameGuildHandler:
             print_debug("Resuming match", save)
             account_ids = set(save["account_ids"])
             gamers = {guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
-            channel = guild.get_channel(save["channel"])
+            channel = guild.get_channel_or_thread(save["channel"])
             restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
             restored_match.last_match = save.get("last_match", 0)
             restored_match.polls = save["polls"]
@@ -2489,18 +2489,21 @@ class Game:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
             game_display = get_game_data(self.game_name, "display", self.game_name)
-            self.scheduled_event = await guild.create_scheduled_event(
-                name=f"{game_display} {self.guild_handler.keyword_title}",
-                start_time=self.future,
-                channel=guild.get_channel(
-                    self.guild_handler.get_server_game_data(
-                        self.game_name, "voice", None
-                    )
-                ),
-                privacy_level=discord.PrivacyLevel.guild_only,
-                entity_type=discord.EntityType.voice,
-                reason=f"Starting {self.guild_handler.keyword} for {name}",
-            )
+            if not get_value(
+                "skip_events", False, table=self.guild_handler.server_settings
+            ):
+                self.scheduled_event = await guild.create_scheduled_event(
+                    name=f"{game_display} {self.guild_handler.keyword_title}",
+                    start_time=self.future,
+                    channel=guild.get_channel(
+                        self.guild_handler.get_server_game_data(
+                            self.game_name, "voice", None
+                        )
+                    ),
+                    privacy_level=discord.PrivacyLevel.guild_only,
+                    entity_type=discord.EntityType.voice,
+                    reason=f"Starting {self.guild_handler.keyword} for {name}",
+                )
             msg = f"{self.base_mention} {name} scheduled a {self.guild_handler.keyword} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
