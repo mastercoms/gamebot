@@ -685,10 +685,10 @@ class GameGuildHandler:
             return
         voice_channel = voice_state.channel
         if content.lower() == "random voiceline":
-            responses = self.responses_table.all()
+            responses = client.responses_table.all()
         else:
             response_text = preprocess_text(content)
-            responses = self.responses_table.search(
+            responses = client.responses_table.search(
                 Response.processed_text == response_text,
             )
         if len(responses):
@@ -832,7 +832,7 @@ class GameGuildHandler:
         channel = msg_channel
 
         if get_value("require_channel", default=False, table=self.server_settings):
-            if msg_channel.id != get_channel(msg_channel):
+            if msg_channel.id != get_channel(msg_channel).id:
                 return
 
         original_content = message.content
@@ -2585,7 +2585,8 @@ class Game:
             size_c = len(self.gamer_buckets)
             size = f"**({size_c}/{max_bucket})**"
             with_str = get_bucket_str(
-                min_bucket, f"{self.keyword}{self.keyword_subject_suffix}"
+                min_bucket,
+                f"{self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix}",
             )
             if self.is_checking:
                 # we're adding a gamer to overfill
