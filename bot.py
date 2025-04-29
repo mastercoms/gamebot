@@ -398,6 +398,34 @@ class DotaAPI:
         return resp["result"]
 
     @staticmethod
+    async def get_match_by_seq_num(seq_num: int) -> dict[str, Any] | None:
+        if not client.steamapi:
+            return None
+        tries = 0
+        while True:
+            # this endpoint regularly fails, so we retry a few times
+            tries += 1
+            try:
+                resp = client.steamapi.IDOTA2Match_570.GetMatchHistoryBySequenceNum(
+                    start_at_match_seq_num=str(seq_num),
+                    matches_requested=1,
+                )
+                if resp["status"] != 1:
+                    raise ValueError(
+                        f"Match seq {seq_num} error: {resp['statusDetail']}"
+                    )
+                if len(resp["matches"]) < 1:
+                    raise ValueError(f"Match seq {seq_num} not found")
+                print_debug(f"get_match_by_seq_num: {resp}")
+                break
+            except Exception:
+                if tries >= 10:
+                    print("Failed to get match details:", traceback.format_exc())
+                    return None
+                await asyncio.sleep(get_backoff(tries))
+        return resp["result"]["matches"][0]
+
+    @staticmethod
     async def request_parse(match_id: int) -> None:
         await client.opendota.post(f"/request/{match_id}")
         return None
@@ -409,8 +437,8 @@ class DotaAPI:
         return match
 
     @staticmethod
-    async def get_match(match_id: int) -> dict[str, Any] | None:
-        match = await DotaAPI.get_match_steam(match_id)
+    async def get_match(match_id: int, match_seq_num: int) -> dict[str, Any] | None:
+        match = await DotaAPI.get_match_by_seq_num(match_seq_num)
         if not match:
             match = await DotaAPI.get_parsed_match(match_id)
         return match
@@ -2155,6 +2183,7 @@ class DotaMatch(Match):
 
         # match ID
         match_id = match["match_id"]
+        match_seq_num = match["match_seq_num"]
 
         print_debug(f"posting match_id: {match_id}")
 
@@ -2187,7 +2216,7 @@ class DotaMatch(Match):
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
         if extras:
-            match_details = await DotaAPI.get_match(match_id)
+            match_details = await DotaAPI.get_match(match_id, match_seq_num)
         else:
             match_details = match
 
