@@ -1145,7 +1145,7 @@ class GameClient(discord.ext.commands.Bot):
         if not guild_handler:
             return
 
-        guild_handler.handle_game_command()
+        await guild_handler.handle_game_command()
 
     async def handle_voiceline_command(
         self,
@@ -1157,7 +1157,7 @@ class GameClient(discord.ext.commands.Bot):
         if not guild_handler:
             return
 
-        guild_handler.handle_voiceline_command(author, channel, content)
+        await guild_handler.handle_voiceline_command(author, channel, content)
 
     async def on_app_command_game(self, interaction: discord.Interaction):
         # TODO
@@ -1194,7 +1194,7 @@ class GameClient(discord.ext.commands.Bot):
         if not guild_handler:
             return
 
-        guild_handler.on_scheduled_event_user_add(event, user)
+        await guild_handler.on_scheduled_event_user_add(event, user)
 
     async def on_scheduled_event_user_remove(
         self, event: discord.ScheduledEvent, user: discord.User
@@ -1203,14 +1203,14 @@ class GameClient(discord.ext.commands.Bot):
         if not guild_handler:
             return
 
-        guild_handler.on_scheduled_event_user_remove(event, user)
+        await guild_handler.on_scheduled_event_user_remove(event, user)
 
     async def on_scheduled_event_delete(self, event: discord.ScheduledEvent):
         guild_handler = self.guild_handlers.get(event.guild.id)
         if not guild_handler:
             return
 
-        guild_handler.on_scheduled_event_delete(event)
+        await guild_handler.on_scheduled_event_delete(event)
 
     async def on_scheduled_event_update(
         self, before: discord.ScheduledEvent, after: discord.ScheduledEvent
@@ -1222,14 +1222,14 @@ class GameClient(discord.ext.commands.Bot):
         if not guild_handler:
             return
 
-        guild_handler.on_scheduled_event_update(before, after)
+        await guild_handler.on_scheduled_event_update(before, after)
 
     async def on_message(self, message: discord.Message):
         guild_handler = self.guild_handlers.get(message.guild.id)
         if not guild_handler:
             return
 
-        guild_handler.on_message(message)
+        await guild_handler.on_message(message)
 
 
 client: GameClient | None = None
