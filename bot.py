@@ -1347,6 +1347,12 @@ def increment(val: int) -> int:
     return val + 1
 
 
+# TODO: include estimated queue time?
+# we assume the minimum game time is around 10 minutes
+# then we assume the next appropriate time is 15 minutes
+# then 20 minutes
+# after 20 minutes, we keep trying to check every 1.5 minutes because it's likely the game will end at any moment
+# keep in mind this includes turbo
 MATCH_POLL_INTERVALS = [10 * 60, 5 * 60, 5 * 60, 1.5 * 60]
 MATCH_POLL_INTERVAL_COUNT = len(MATCH_POLL_INTERVALS)
 MATCH_POLL_INTERVAL_FIRST = MATCH_POLL_INTERVALS[0]
