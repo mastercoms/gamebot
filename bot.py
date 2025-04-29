@@ -829,9 +829,7 @@ class GameGuildHandler:
 
         msg_channel = message.thread or message.channel
 
-        if get_value(
-            "require_channel", False, table=self.guild_handler.server_settings
-        ):
+        if get_value("require_channel", False, table=self.server_settings):
             if msg_channel.id != get_channel(msg_channel):
                 return
 
