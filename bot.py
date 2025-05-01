@@ -448,8 +448,12 @@ class DotaAPI:
         return match
 
     @staticmethod
-    async def get_match(match_id: int, match_seq_num: int) -> dict[str, Any] | None:
-        match = await DotaAPI.get_match_by_seq_num(match_seq_num)
+    async def get_match(
+        match_id: int, match_seq_num: int | None
+    ) -> dict[str, Any] | None:
+        match = None
+        if match_seq_num is not None:
+            match = await DotaAPI.get_match_by_seq_num(match_seq_num)
         if not match:
             match = await DotaAPI.get_parsed_match(match_id)
         return match
@@ -678,10 +682,14 @@ class GameGuildHandler:
             account_ids = set(save["account_ids"])
             gamers = {guild.get_member(gamer_id) for gamer_id in save["gamer_ids"]}
             channel = guild.get_channel_or_thread(save["channel"])
-            restored_match = DotaMatch(account_ids, gamers, channel, should_check=False)
+            restored_match = DotaMatch(
+                account_ids, gamers, channel, should_check=False, serialize=False
+            )
             restored_match.last_match = save.get("last_match", 0)
             restored_match.polls = save["polls"]
             restored_match.timestamp = timestamp
+            restored_match.serialize = True
+            restored_match.save()
             self.current_match = restored_match
             self.current_match.start_check()
         except Exception:
@@ -2105,17 +2113,20 @@ class DotaMatch(Match):
         await race_realtime(channel, gamer)
 
     async def get_recent_match(self) -> dict[str, Any] | None:
-        matches: list[dict[str, Any]] = await DotaAPI.get_matches(
+        steam_matches: list[dict[str, Any]] = await DotaAPI.get_matches(
             self.account_id,
             matches_requested="1",
         )
+        matches = steam_matches
         odota_matches = await DotaAPI.get_recent_matches(self.account_id)
+        using_odota = False
         if odota_matches:
             if (
                 matches is None
                 or odota_matches[0]["match_id"] == matches[0]["match_id"]
             ):
                 matches = odota_matches
+                using_odota = True
         if matches:
             match = matches[0]
             # we've seen this match before
@@ -2155,6 +2166,16 @@ class DotaMatch(Match):
             print_debug(f"check times: {start_time} < {self.timestamp}")
             if start_time < self.timestamp:
                 return None
+
+            # prepare this match for return
+            # odota excludes the seq num
+            if using_odota and steam_matches:
+                steam_match = next(
+                    (x for x in steam_matches if x["match_id"] == match_id), None
+                )
+                if steam_match:
+                    match["match_seq_num"] = steam_match["match_seq_num"]
+
             return match
         return None
 
@@ -2198,7 +2219,7 @@ class DotaMatch(Match):
 
         # match ID
         match_id = match["match_id"]
-        match_seq_num = match["match_seq_num"]
+        match_seq_num = match.get("match_seq_num", None)
 
         print_debug(f"posting match_id: {match_id}")
 
@@ -2222,7 +2243,7 @@ class DotaMatch(Match):
             self.polls = 0
             self.update_timestamp()
 
-        print_debug(f"detail_wait: {detail_wait}")
+            print_debug(f"detail_wait: {detail_wait}")
 
         # wait for match details to be available
         if extras and detail_wait > 0:
