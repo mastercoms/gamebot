@@ -296,6 +296,18 @@ class DotaAPI:
         return resp.json()
 
     @staticmethod
+    async def post(*args, **kwargs) -> dict[str, Any] | list[dict[str, Any]]:
+        try:
+            resp = await client.opendota.post(*args, **kwargs)
+        except Exception:
+            print("Failed to post:", traceback.format_exc())
+            return None
+        if resp.status_code != 200:
+            print("Failed to post:", resp.status_code, resp.text)
+            return None
+        return resp.json()
+
+    @staticmethod
     async def query_constants():
         now = utcnow()
         if (now - DotaAPI.last_constants_query) < datetime.timedelta(hours=12):
@@ -427,8 +439,7 @@ class DotaAPI:
 
     @staticmethod
     async def request_parse(match_id: int) -> None:
-        await client.opendota.post(f"/request/{match_id}")
-        return None
+        return await DotaAPI.post(f"/request/{match_id}")
 
     @staticmethod
     async def get_parsed_match(match_id: int) -> dict[str, Any] | None:
@@ -590,6 +601,10 @@ class GameGuildHandler:
         self.backup_table = self.guild_db.table("backup")
         self.settings_table = self.guild_db.table("settings")
         self.server_settings = self.guild_db.table("server_settings")
+        self.local_timezone = (
+            get_value("timezone", table=self.server_settings) or LOCAL_TIMEZONE
+        )
+        self.local_tzinfo = ZoneInfo(self.local_timezone)
         self.keyword = get_value("keyword", table=self.server_settings) or KEYWORD
         self.keyword_subject_suffix = "rs" if self.keyword.endswith("e") else "ers"
         self.keyword_title = self.keyword[0].upper() + self.keyword[1:]
@@ -2212,7 +2227,8 @@ class DotaMatch(Match):
         # wait for match details to be available
         if extras and detail_wait > 0:
             await asyncio.sleep(MATCH_WAIT_TIME)
-        await DotaAPI.request_parse(match_id)
+        parse_request = await DotaAPI.request_parse(match_id)
+        print_debug(f"parse: {parse_request}")
         if extras:
             await asyncio.sleep(MATCH_WAIT_TIME)
         if extras:
@@ -3079,10 +3095,11 @@ def process_at(args: list[str], gamer: discord.Member) -> datetime.datetime | No
     last = len(args)
     confirmed_date = None
     the_timezone = get_value(str(gamer.id), default=None, table=client.timezone_table)
+    guild_handler = client.guild_handlers[gamer.guild.id]
     if the_timezone:
         the_timezone = ZoneInfo(the_timezone)
     if not the_timezone:
-        the_timezone = LOCAL_TZINFO
+        the_timezone = guild_handler.local_tzinfo
     # TODO: guild now
     # guild_handler = client.guild_handlers[gamer.guild.id]
     # client_now = guild_handler.now
@@ -3726,7 +3743,6 @@ with open("settings.json", "rb") as f:
     config = orjson.loads(f.read())
 
     LOCAL_TIMEZONE = config.get("local_timezone", "US/Eastern")
-    LOCAL_TZINFO = ZoneInfo(LOCAL_TIMEZONE)
 
     KEYWORD = config.get("keyword", "game")
 
