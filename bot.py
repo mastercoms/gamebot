@@ -11,6 +11,7 @@ gevent.monkey.patch_ssl()
 gevent.monkey.patch_dns()
 
 import asyncio
+import base64
 import dataclasses
 import datetime
 import hashlib
@@ -314,7 +315,7 @@ class DotaAPI:
             return DOTA_CACHED_CONSTANTS
         DotaAPI.last_constants_query = now
         async with httpx.AsyncClient(
-            base_url="https://raw.githubusercontent.com/odota/dotaconstants/master/build/",
+            base_url="https://api.github.com/repos/odota/dotaconstants/contents/build/",
         ) as odotagh:
             for res in DotaAPI.resources:
                 url = f"{res}.json"
@@ -323,7 +324,11 @@ class DotaAPI:
                     print("Failed to get:", resp.status_code, resp.text)
                     DotaAPI.last_constants_query = EPOCH
                     continue
-                DOTA_CACHED_CONSTANTS[res] = resp.json()
+                data = resp.json()
+                if data["encoding"] != "base64":
+                    raise ValueError("GitHub contents API not returning base64!")
+                content = data["content"]
+                DOTA_CACHED_CONSTANTS[res] = base64.b64decode(content).decode("utf-8")
         # print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
 
     @staticmethod
