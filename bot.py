@@ -313,7 +313,6 @@ class DotaAPI:
         now = utcnow()
         if (now - DotaAPI.last_constants_query) < datetime.timedelta(hours=12):
             return DOTA_CACHED_CONSTANTS
-        DotaAPI.last_constants_query = now
         async with httpx.AsyncClient(
             base_url="https://api.github.com/repos/odota/dotaconstants/contents/build/",
             timeout=10.0,
@@ -336,6 +335,7 @@ class DotaAPI:
                     raise ValueError("GitHub contents API not returning base64!")
                 content = data["content"]
                 DOTA_CACHED_CONSTANTS[res] = base64.b64decode(content).decode("utf-8")
+        DotaAPI.last_constants_query = now
         # print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
 
     @staticmethod
