@@ -316,6 +316,11 @@ class DotaAPI:
         DotaAPI.last_constants_query = now
         async with httpx.AsyncClient(
             base_url="https://api.github.com/repos/odota/dotaconstants/contents/build/",
+            headers={
+                "User-Agent": "mastercoms/gamebot",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
         ) as odotagh:
             for res in DotaAPI.resources:
                 url = f"{res}.json"
