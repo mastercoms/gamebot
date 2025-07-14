@@ -1067,7 +1067,10 @@ class GameGuildHandler:
                         if not options.future:
                             options.future = client.now + MIN_CHECK_DELTA
                         # check for game update for constants
-                        await DotaAPI.query_constants()
+                        try:
+                            await DotaAPI.query_constants()
+                        except Exception:
+                            print("Querying constants failed:", traceback.format_exc())
                         print_debug("Starting game", options.future, gamer)
                         self.current_game = Game(channel, gamer, options.game)
                         await self.current_game.start(options.future)
