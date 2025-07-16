@@ -334,7 +334,7 @@ class DotaAPI:
                 if data["encoding"] != "base64":
                     raise ValueError("GitHub contents API not returning base64!")
                 content = data["content"]
-                DOTA_CACHED_CONSTANTS[res] = base64.b64decode(content).decode("utf-8")
+                DOTA_CACHED_CONSTANTS[res] = orjson.loads(base64.b64decode(content).decode("utf-8"))
         DotaAPI.last_constants_query = now
         # print_debug(f"Queried {DotaAPI.resources} constants: {DOTA_CACHED_CONSTANTS}")
 
