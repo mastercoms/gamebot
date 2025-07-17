@@ -3398,7 +3398,7 @@ async def consume_args(
         await channel.send(
             """Just say `game` to schedule a game, and say `game` to join up for a scheduled one. Only supports scheduling one at a time.
 
-When starting it, you can also say some arguments:
+When starting it, you can also say some parameters:
 
 * `at <time>`: set a specific date/time to check at. ex: `at 9`, `at 9pm`, `at 9pm PST`, `at 9:30`, etc.
 * `in <time>`: set a length of time to check at. ex: `in 1h`, `in 1.5h`, `in 5m`, `in 5 mins`, `in 5 hours, 20 minutes, 30 seconds`, etc.
@@ -3409,7 +3409,7 @@ While it's started, anyone can say:
 * `cancel`: cancels the scheduled game.
 * `now`: skips ahead to finish the schedule now.
 * `leave`: leaves a scheduled game you joined.
-* `but`: restart the game with new starting arguments
+* `but`: restart the game with new starting parameters
 
 Either when starting it, or while it's started, you can say:
 
@@ -3419,6 +3419,7 @@ In any case, anyone can say:
 
 * `status [user]`: gives the status of a game currently running, or of any specified Discord user's game. Currently only supports Dota 2. 
 * `register <steam account>`: associates a given Steam user to your Discord account for match handling.
+* `unregister`: unassociates your Steam ID from your Discord account.
 * `option set <key> [value]`: sets an option, or removes it if value not specified (admins only)
 * `option get <key>`: gets an option (admins only)
 * `mark [in/at] <time> to [in/at] <time>`: marks yourself as available for a scheduled game at a given time"""
@@ -3516,6 +3517,10 @@ In any case, anyone can say:
         )
         await channel.send("Steam ID linked. Matches will now be listed.")
         return None
+    if control == "unregister"
+      client.players_table.remove(Player.id == gamer.id)
+      await channel.send("Steam ID unlinked. Matches will no longer be listed.")
+      return None
     if control == "timezone":
         if args:
             my_tz = args.pop(0)
