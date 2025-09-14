@@ -385,7 +385,7 @@ class DotaAPI:
                     print("Failed to get match details:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
-        return resp["result"]["matches"]
+        return resp["result"].get("matches", [])
 
     @staticmethod
     async def get_basic_matches(steam_id: int, **params) -> list[dict[str, Any]]:
@@ -434,6 +434,7 @@ class DotaAPI:
                     start_at_match_seq_num=str(seq_num),
                     matches_requested=1,
                 )
+                resp = resp["result"]
                 if resp["status"] != 1:
                     raise ValueError(
                         f"Match seq {seq_num} error: {resp['statusDetail']}"
@@ -2369,14 +2370,16 @@ class DotaMatch(Match):
                 rank, rank_icon = DOTA_RANKS.get(basic_match["average_rank"])
         if rank == "Unknown" and match_details:
             ranked_match_details = match_details
-            if "rank_tier" not in match_details["players"][0]:
+            if "rank_tier" not in ranked_match_details["players"][0]:
                 ranked_match_details = await DotaAPI.get_parsed_match(match_id)
             ranks = []
-            for player in ranked_match_details["players"]:
-                if player["rank_tier"]:
-                    ranks.append(player["rank_tier"])
-            average_rank = average_medal(ranks)
-            rank, rank_icon = DOTA_RANKS.get(average_rank)
+            if "rank_tier" in ranked_match_details["players"][0]:
+                for player in ranked_match_details["players"]:
+                    if player["rank_tier"]:
+                        ranks.append(player["rank_tier"])
+            if ranks:
+                average_rank = average_medal(ranks)
+                rank, rank_icon = DOTA_RANKS.get(average_rank)
 
         embed.set_author(name=rank, icon_url=rank_icon)
 
