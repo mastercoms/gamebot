@@ -3520,7 +3520,7 @@ In any case, anyone can say:
         )
         await channel.send("Steam ID linked. Matches will now be listed.")
         return None
-    if control == "unregister"
+    if control == "unregister":
       client.players_table.remove(Player.id == gamer.id)
       await channel.send("Steam ID unlinked. Matches will no longer be listed.")
       return None
