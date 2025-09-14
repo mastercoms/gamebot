@@ -448,7 +448,7 @@ class DotaAPI:
                     print("Failed to get match details:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
-        return resp["result"]["matches"][0]
+        return resp["matches"][0]
 
     @staticmethod
     async def request_parse(match_id: int) -> None:
