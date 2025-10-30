@@ -382,7 +382,7 @@ class DotaAPI:
                 break
             except Exception:
                 if tries >= 3:
-                    print("Failed to get match details:", traceback.format_exc())
+                    print("Failed to get match details through history:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["result"].get("matches", [])
@@ -445,7 +445,7 @@ class DotaAPI:
                 break
             except Exception:
                 if tries >= 10:
-                    print("Failed to get match details:", traceback.format_exc())
+                    print("Failed to get match details through history by seq num:", traceback.format_exc())
                     return None
                 await asyncio.sleep(get_backoff(tries))
         return resp["matches"][0]
@@ -2143,6 +2143,7 @@ class DotaMatch(Match):
             ):
                 matches = odota_matches
                 using_odota = True
+                print("Using odota")
         if matches:
             match = matches[0]
             # we've seen this match before
@@ -2193,6 +2194,7 @@ class DotaMatch(Match):
                     match["match_seq_num"] = steam_match["match_seq_num"]
 
             return match
+        print("Could not find odota or steam match in history.")
         return None
 
     async def get_basic_match(self, match_id: int) -> dict[str, Any] | None:
