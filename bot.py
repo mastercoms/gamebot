@@ -1880,6 +1880,9 @@ class DotaMatch(Match):
         if not client.steamapi:
             return
 
+        if not self.account_id:
+            return
+
         # request spectate for steam server ID
         client.dotaclient.send(
             EDOTAGCMsg.EMsgGCSpectateFriendGame,
@@ -2129,6 +2132,8 @@ class DotaMatch(Match):
         await race_realtime(channel, gamer)
 
     async def get_recent_match(self) -> dict[str, Any] | None:
+        if not self.account_id:
+            return None
         steam_matches: list[dict[str, Any]] = await DotaAPI.get_matches(
             self.account_id,
             matches_requested="1",
@@ -2143,7 +2148,7 @@ class DotaMatch(Match):
             ):
                 matches = odota_matches
                 using_odota = True
-                print("Using odota")
+                print_debug("Using odota")
         if matches:
             match = matches[0]
             # we've seen this match before
@@ -2211,6 +2216,7 @@ class DotaMatch(Match):
     async def check_match(self):
         # TODO: track each interval so we can know how long to wait for match details
         interval = self.get_poll_interval()
+        print_debug(f"Waiting for {interval} before checking match")
         await asyncio.sleep(interval)
         match = await self.get_recent_match()
         self.polls += 1
