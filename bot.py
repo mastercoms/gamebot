@@ -2381,7 +2381,7 @@ class DotaMatch(Match):
             if "rank_tier" not in ranked_match_details["players"][0]:
                 ranked_match_details = await DotaAPI.get_parsed_match(match_id)
             ranks = []
-            if "rank_tier" in ranked_match_details["players"][0]:
+            if ranked_match_details and "rank_tier" in ranked_match_details["players"][0]:
                 for player in ranked_match_details["players"]:
                     if player["rank_tier"]:
                         ranks.append(player["rank_tier"])
