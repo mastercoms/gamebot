@@ -766,7 +766,7 @@ class GameGuildHandler:
                 try:
                     if not cache_path.exists():
                         with open(cache_path, "wb") as download_file:
-                            async with self.http_client.stream("GET", link) as stream:
+                            async with client.http_client.stream("GET", link) as stream:
                                 async for chunk in stream.aiter_bytes():
                                     download_file.write(chunk)
                     if cache_path.stat().st_size < 2048 or not cache_path.exists():
@@ -786,7 +786,7 @@ class GameGuildHandler:
                     await asyncio.sleep(get_backoff(tries))
 
             voice_client: discord.VoiceClient | None = None
-            for voice_client in self.voice_clients:
+            for voice_client in client.voice_clients:
                 if voice_client.channel == voice_channel:
                     break
                 if voice_client.guild == voice_channel.guild:
