@@ -759,7 +759,7 @@ class GameGuildHandler:
             response = random.choice(responses)
             link = response["response_link"]
             file_name = link.split("/")[-1]
-            cache_path = self.responses_cache / file_name
+            cache_path = client.responses_cache / file_name
             tries = 0
             while True:
                 tries += 1
