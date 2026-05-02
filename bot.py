@@ -282,6 +282,12 @@ class DiscordUtil:
 
 class DotaAPI:
     resources = ["cluster", "lobby_type", "game_mode", "region", "xp_level"]
+    resource_target = {
+        "cluster": {
+            "org": "mastercoms",
+            "ref": "patch-1",
+        }
+    }
     last_constants_query: datetime.datetime = EPOCH
 
     @staticmethod
@@ -314,7 +320,7 @@ class DotaAPI:
         if (now - DotaAPI.last_constants_query) < datetime.timedelta(hours=12):
             return DOTA_CACHED_CONSTANTS
         async with httpx.AsyncClient(
-            base_url="https://api.github.com/repos/odota/dotaconstants/contents/build/",
+            base_url="https://api.github.com/repos/",
             timeout=10.0,
             http2=True,
             headers={
@@ -324,7 +330,16 @@ class DotaAPI:
             }
         ) as odotagh:
             for res in DotaAPI.resources:
-                url = f"{res}.json"
+                org = "odota"
+                repo = "dotaconstants"
+                ref = None
+                target = DotaAPI.resource_target.get(res)
+                if target:
+                    org = target.get("org", org)
+                    ref = target.get("ref")
+                url = f"{org}/dotaconstants/contents/build/{res}.json"
+                if ref:
+                    url += f"?ref={ref}"
                 resp = await odotagh.get(url)
                 if resp.status_code != 200:
                     print("Failed to get:", resp.status_code, resp.text)
@@ -2383,8 +2398,9 @@ class DotaMatch(Match):
             ranks = []
             if ranked_match_details and "rank_tier" in ranked_match_details["players"][0]:
                 for player in ranked_match_details["players"]:
-                    if player["rank_tier"]:
-                        ranks.append(player["rank_tier"])
+                    rank_tier = player.get("rank_tier")
+                    if rank_tier:
+                        ranks.append(rank_tier)
             if ranks:
                 average_rank = average_medal(ranks)
                 rank, rank_icon = DOTA_RANKS.get(average_rank)
