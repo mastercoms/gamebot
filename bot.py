@@ -2601,7 +2601,7 @@ class Game:
             game_display = self.game_name[0].upper() + self.game_name[1:]
         game_display_latchon = ""
         if self.game_name != DEFAULT_GAME:
-            game_display_latchon = f" for {game_display_latchon}"
+            game_display_latchon = f" for {game_display}"
         return game_display, game_display_latchon
     
     async def initialize(self, mention: str = None):
