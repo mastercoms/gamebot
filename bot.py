@@ -2617,7 +2617,7 @@ class Game:
             )
         name = self.author.display_name
         relative_time = print_timestamp(self.timestamp, "R")
-        game_display, game_display_latchon = self.game_display_parts()
+        game_display, game_display_latchon = self.get_game_display_parts()
         if self.is_checking:
             msg = f"{self.base_mention} {name} requested a {self.guild_handler.keyword_title} Check{game_display_latchon}. (expires {relative_time})"
         else:
@@ -2807,7 +2807,7 @@ class Game:
                 print_debug("Finishing check")
                 # finish the game
                 max_gamers = get_game_data(self.game_name, "max", game_min)
-                game_display, game_display_latchon = self.game_display_parts()
+                game_display, game_display_latchon = self.get_game_display_parts()
                 await self.channel.send(
                     f"{mention} {self.guild_handler.keyword_title} Check{game_display_latchon} complete. **{num_gamers}/{max_gamers}** players ready to {self.guild_handler.keyword}.",
                 )
@@ -2860,7 +2860,7 @@ class Game:
                 default=0,
                 table=self.guild_handler.guild_db,
             )
-            game_display, game_display_latchon = self.game_display_parts()
+            game_display, game_display_latchon = self.get_game_display_parts()
             game_display_pre = ""
             if self.game_name != DEFAULT_GAME:
                 game_display_pre = f" {game_display}"
