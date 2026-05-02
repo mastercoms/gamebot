@@ -282,12 +282,7 @@ class DiscordUtil:
 
 class DotaAPI:
     resources = ["cluster", "lobby_type", "game_mode", "region", "xp_level"]
-    resource_target = {
-        "cluster": {
-            "org": "mastercoms",
-            "ref": "patch-1",
-        }
-    }
+    resource_target = {}
     last_constants_query: datetime.datetime = EPOCH
 
     @staticmethod
