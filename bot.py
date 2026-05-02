@@ -2595,6 +2595,15 @@ class Game:
         if self.was_scheduled is None:
             self.was_scheduled = not self.is_checking
 
+    def get_game_display_parts(self):
+        game_display = get_game_data(self.game_name, "display", None)
+        if not game_display:
+            game_display = self.game_name[0].upper() + self.game_name[1:]
+        game_display_latchon = ""
+        if self.game_name != DEFAULT_GAME:
+            game_display_latchon = f" for {game_display_latchon}"
+        return game_display, game_display_latchon
+    
     async def initialize(self, mention: str = None):
         """
         Starts/schedules the game check.
@@ -2608,12 +2617,12 @@ class Game:
             )
         name = self.author.display_name
         relative_time = print_timestamp(self.timestamp, "R")
+        game_display, game_display_latchon = self.game_display_parts()
         if self.is_checking:
-            msg = f"{self.base_mention} {name} requested a {self.guild_handler.keyword_title} Check. (expires {relative_time})"
+            msg = f"{self.base_mention} {name} requested a {self.guild_handler.keyword_title} Check{game_display_latchon}. (expires {relative_time})"
         else:
             short_time = print_timestamp(self.timestamp, "t")
             guild = self.channel.guild
-            game_display = get_game_data(self.game_name, "display", self.game_name)
             if not get_value(
                 "skip_events", default=False, table=self.guild_handler.server_settings
             ):
@@ -2629,7 +2638,7 @@ class Game:
                     entity_type=discord.EntityType.voice,
                     reason=f"Starting {self.guild_handler.keyword} for {name}",
                 )
-            msg = f"{self.base_mention} {name} scheduled a {self.guild_handler.keyword} at {short_time} ({relative_time})."
+            msg = f"{self.base_mention} {name} scheduled a {self.guild_handler.keyword}{game_display_latchon} at {short_time} ({relative_time})."
         if self.message:
             await self.update_message(msg)
         else:
@@ -2798,8 +2807,9 @@ class Game:
                 print_debug("Finishing check")
                 # finish the game
                 max_gamers = get_game_data(self.game_name, "max", game_min)
+                game_display, game_display_latchon = self.game_display_parts()
                 await self.channel.send(
-                    f"{mention} {self.guild_handler.keyword_title} Check complete. **{num_gamers}/{max_gamers}** players ready to {self.guild_handler.keyword}.",
+                    f"{mention} {self.guild_handler.keyword_title} Check{game_display_latchon} complete. **{num_gamers}/{max_gamers}** players ready to {self.guild_handler.keyword}.",
                 )
                 # we had a game
                 set_value("no_gamers_consecutive", 0, table=self.guild_handler.guild_db)
@@ -2850,8 +2860,12 @@ class Game:
                 default=0,
                 table=self.guild_handler.guild_db,
             )
+            game_display, game_display_latchon = self.game_display_parts()
+            game_display_pre = ""
+            if self.game_name != DEFAULT_GAME:
+                game_display_pre f" {game_display}"
             await self.channel.send(
-                f"No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} found for the {self.guild_handler.keyword}. This server has gone {no_gamers} {self.guild_handler.keyword}s without a {self.guild_handler.keyword}. ({no_gamers_consecutive} in a row).",
+                f"No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} found for the{game_display_pre} {self.guild_handler.keyword}. This server has gone {no_gamers} {self.guild_handler.keyword}s without a {self.guild_handler.keyword}. ({no_gamers_consecutive} in a row).",
             )
             if self.guild_handler.extra_failure_message:
                 await self.channel.send(self.guild_handler.extra_failure_message)
