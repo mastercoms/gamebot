@@ -2863,7 +2863,7 @@ class Game:
             game_display, game_display_latchon = self.game_display_parts()
             game_display_pre = ""
             if self.game_name != DEFAULT_GAME:
-                game_display_pre f" {game_display}"
+                game_display_pre = f" {game_display}"
             await self.channel.send(
                 f"No {self.guild_handler.keyword}{self.guild_handler.keyword_subject_suffix} found for the{game_display_pre} {self.guild_handler.keyword}. This server has gone {no_gamers} {self.guild_handler.keyword}s without a {self.guild_handler.keyword}. ({no_gamers_consecutive} in a row).",
             )
